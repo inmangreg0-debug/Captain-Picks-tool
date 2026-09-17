@@ -20,13 +20,36 @@ function difficultyInfo(difficulty) {
   return { className: "medium", label: "Medium fixture" };
 }
 
+function playerPhotoUrl(player) {
+  return player.photoCode
+    ? `https://resources.premierleague.com/premierleague/photos/players/110x140/p${player.photoCode}.png`
+    : null;
+}
+
+// Fixed-size wrapper is always rendered so rows don't shift once the image
+// loads (or fails) — onerror just drops the <img>, leaving the placeholder.
+function playerPhotoMarkup(player) {
+  const url = playerPhotoUrl(player);
+  return `<span class="player-photo">${
+    url ? `<img src="${url}" alt="" loading="lazy" onerror="this.remove()" />` : ""
+  }</span>`;
+}
+
+function teamBadgeMarkup(player) {
+  if (!player.teamBadge) return "";
+  return `<img class="team-badge" src="${player.teamBadge}" alt="" loading="lazy" onerror="this.remove()" />`;
+}
+
 function renderTrendingColumn(title, players) {
   const rows = players
     .map(
       (player) => `
         <li class="trend__row">
-          <span class="trend__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button></span>
-          <span class="trend__meta">${player.position} · ${player.team} · £${player.price}m</span>
+          <span class="trend__player">
+            ${playerPhotoMarkup(player)}
+            <span class="trend__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button></span>
+          </span>
+          <span class="trend__meta">${player.position} · ${teamBadgeMarkup(player)}${player.team} · £${player.price}m</span>
           <span class="trend__net">${formatNetTransfers(player.netTransfers)}</span>
         </li>
       `
@@ -66,12 +89,15 @@ function renderPlayerList(players, options = {}) {
     item.innerHTML = `
       <span class="pick__rank">${index + 1}</span>
       <span class="pick__main">
-        <span class="pick__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button>${
+        ${playerPhotoMarkup(player)}
+        <span class="pick__text">
+          <span class="pick__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button>${
       isTop ? '<span class="pick__badge">Top pick</span>' : ""
     }</span>
-        <span class="pick__meta">${player.position} · ${player.team} · £${player.price}m${
+          <span class="pick__meta">${player.position} · ${teamBadgeMarkup(player)}${player.team} · £${player.price}m${
       player.reason ? ` · <span class="pick__reason">${player.reason}</span>` : ""
     }</span>
+        </span>
       </span>
       <span class="pick__fixture fixture--${difficultyClass}" title="${difficultyLabel}">
         ${player.isHome ? "vs" : "@"} ${player.opponent}

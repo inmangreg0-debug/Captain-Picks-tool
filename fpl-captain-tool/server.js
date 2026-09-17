@@ -43,6 +43,16 @@ async function getBootstrap() {
 
 const POSITION_NAMES = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
 
+function playerPhotoCode(p) {
+  return p.photo ? p.photo.replace(/\.[^.]+$/, "") : null;
+}
+
+function teamBadgeUrl(team) {
+  return team && team.code
+    ? `https://resources.premierleague.com/premierleague/badges/70/t${team.code}.png`
+    : null;
+}
+
 // How much more fixture ease should count than recent form when scoring a
 // player. >1 means fixture difficulty dominates the score; tune here.
 const FIXTURE_WEIGHT = 1.5;
@@ -134,6 +144,8 @@ async function getCaptainPicks() {
         price: (p.now_cost / 10).toFixed(1),
         ownership: p.selected_by_percent,
         score,
+        photoCode: playerPhotoCode(p),
+        teamBadge: teamBadgeUrl(team),
       };
     })
     .filter(Boolean);
@@ -191,6 +203,8 @@ async function getCaptainPicks() {
         score,
         reason,
         flagged,
+        photoCode: playerPhotoCode(p),
+        teamBadge: teamBadgeUrl(team),
       };
     })
     .filter(Boolean);
@@ -223,6 +237,8 @@ async function getCaptainPicks() {
       position: POSITION_NAMES[p.element_type] || "",
       price: (p.now_cost / 10).toFixed(1),
       netTransfers: p.transfers_in_event - p.transfers_out_event,
+      photoCode: playerPhotoCode(p),
+      teamBadge: teamBadgeUrl(team),
     };
   });
 
@@ -336,6 +352,10 @@ app.get("/api/player/:id", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Captain picks tool running at http://localhost:${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Captain picks tool running at http://localhost:${PORT}`);
+  });
+}
+
+export default app;
