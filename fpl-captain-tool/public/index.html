@@ -29,6 +29,8 @@
 
     <section class="avoid" id="avoid"></section>
 
+    <section class="out-of-form" id="out-of-form"></section>
+
     <section class="explainer">
       <h2>How this is scored</h2>
       <p>
@@ -47,6 +49,14 @@
   <footer class="site-footer">
     <p>Data from the official Fantasy Premier League API. Refreshed every 10 minutes.</p>
   </footer>
+
+  <div class="player-modal" id="player-modal" hidden>
+    <div class="player-modal__backdrop" data-dismiss="backdrop"></div>
+    <div class="player-modal__panel" role="dialog" aria-modal="true" aria-labelledby="player-modal-name">
+      <button type="button" class="player-modal__close" id="player-modal-close" aria-label="Close">&times;</button>
+      <div class="player-modal__body" id="player-modal-body"></div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

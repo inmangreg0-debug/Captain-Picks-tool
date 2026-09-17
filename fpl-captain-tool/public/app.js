@@ -25,7 +25,7 @@ function renderTrendingColumn(title, players) {
     .map(
       (player) => `
         <li class="trend__row">
-          <span class="trend__name">${player.name}</span>
+          <span class="trend__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button></span>
           <span class="trend__meta">${player.position} · ${player.team} · £${player.price}m</span>
           <span class="trend__net">${formatNetTransfers(player.netTransfers)}</span>
         </li>
@@ -42,7 +42,7 @@ function renderTrendingColumn(title, players) {
 }
 
 function renderPlayerList(players, options = {}) {
-  const { highlightTop = false, avoidStyle = false } = options;
+  const { highlightTop = false, avoidStyle = false, mediumStyle = false } = options;
 
   const list = document.createElement("ol");
   list.className = "pick-list";
@@ -54,6 +54,7 @@ function renderPlayerList(players, options = {}) {
       "pick",
       isTop ? "pick--top" : "",
       avoidStyle ? "pick--avoid" : "",
+      mediumStyle ? "pick--outofform" : "",
     ]
       .filter(Boolean)
       .join(" ");
@@ -65,7 +66,7 @@ function renderPlayerList(players, options = {}) {
     item.innerHTML = `
       <span class="pick__rank">${index + 1}</span>
       <span class="pick__main">
-        <span class="pick__name">${player.name}${
+        <span class="pick__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button>${
       isTop ? '<span class="pick__badge">Top pick</span>' : ""
     }</span>
         <span class="pick__meta">${player.position} · ${player.team} · £${player.price}m${
@@ -118,6 +119,108 @@ function renderTrending(data) {
       ${renderTrendingColumn("Trending out", data.trendingDown || [])}
     </div>
   `;
+}
+
+function playerFixtureRow(entry, kind) {
+  if (kind === "past") {
+    return `
+      <tr>
+        <td>${entry.isHome ? "vs" : "@"} ${entry.opponent}</td>
+        <td>${entry.points}</td>
+        <td>${entry.minutes}'</td>
+      </tr>
+    `;
+  }
+
+  const { className, label } = difficultyInfo(entry.difficulty);
+  return `
+    <tr>
+      <td>${entry.isHome ? "vs" : "@"} ${entry.opponent}</td>
+      <td><span class="fixture-tag fixture--${className}">${label}</span></td>
+      <td>${entry.projectedPoints.toFixed(1)}</td>
+    </tr>
+  `;
+}
+
+function renderPlayerModalContent(detail) {
+  const lastFiveRows = detail.lastFive.length
+    ? detail.lastFive.map((h) => playerFixtureRow(h, "past")).join("")
+    : '<tr><td colspan="3">No gameweeks played yet this season.</td></tr>';
+
+  const nextFiveRows = detail.nextFive.length
+    ? detail.nextFive.map((f) => playerFixtureRow(f, "future")).join("")
+    : '<tr><td colspan="3">No fixtures scheduled.</td></tr>';
+
+  return `
+    <h2 id="player-modal-name" class="player-modal__title">${detail.name}</h2>
+    <p class="player-modal__meta">${detail.position} · ${detail.team} · Form ${detail.form.toFixed(1)}</p>
+    <div class="player-modal__section">
+      <h3 class="player-modal__heading">Last 5 gameweeks</h3>
+      <table class="player-modal__table">
+        <thead><tr><th>Opponent</th><th>Pts</th><th>Mins</th></tr></thead>
+        <tbody>${lastFiveRows}</tbody>
+      </table>
+    </div>
+    <div class="player-modal__section">
+      <h3 class="player-modal__heading">Next 5 fixtures</h3>
+      <table class="player-modal__table">
+        <thead><tr><th>Opponent</th><th>Difficulty</th><th>Proj. pts</th></tr></thead>
+        <tbody>${nextFiveRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openPlayerModal(id) {
+  const modal = document.getElementById("player-modal");
+  const body = document.getElementById("player-modal-body");
+  if (!modal || !body) return;
+
+  modal.hidden = false;
+  document.body.classList.add("modal-open");
+  body.innerHTML = '<p class="player-modal__loading">Loading player…</p>';
+
+  fetch(`/api/player/${id}`)
+    .then((res) => {
+      if (!res.ok) throw new Error("Request failed");
+      return res.json();
+    })
+    .then((detail) => {
+      body.innerHTML = renderPlayerModalContent(detail);
+    })
+    .catch((err) => {
+      console.error(err);
+      body.innerHTML =
+        '<p class="player-modal__error">Could not load player details right now.</p>';
+    });
+}
+
+function closePlayerModal() {
+  const modal = document.getElementById("player-modal");
+  const body = document.getElementById("player-modal-body");
+  if (!modal) return;
+  modal.hidden = true;
+  document.body.classList.remove("modal-open");
+  if (body) body.innerHTML = "";
+}
+
+function initPlayerModal() {
+  const modal = document.getElementById("player-modal");
+  const closeButton = document.getElementById("player-modal-close");
+  if (!modal || !closeButton) return;
+
+  closeButton.addEventListener("click", closePlayerModal);
+  modal.addEventListener("click", (e) => {
+    if (e.target.dataset.dismiss === "backdrop") closePlayerModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.hidden) closePlayerModal();
+  });
+  document.addEventListener("click", (e) => {
+    const trigger = e.target.closest(".player-link[data-player-id]");
+    if (!trigger) return;
+    openPlayerModal(trigger.dataset.playerId);
+  });
 }
 
 async function loadCaptainPicks() {
@@ -179,10 +282,17 @@ async function loadCaptainPicks() {
       data.avoidThisWeek,
       { avoidStyle: true }
     );
+    renderSection(
+      "out-of-form",
+      "Out of form",
+      "Still widely owned, but form has dropped — worth a look before your next transfer.",
+      data.outOfForm,
+      { mediumStyle: true }
+    );
   } catch (err) {
     console.error(err);
     board.innerHTML = "";
-    ["trending", "differentials", "avoid"].forEach((id) => {
+    ["trending", "differentials", "avoid", "out-of-form"].forEach((id) => {
       const section = document.getElementById(id);
       if (section) section.innerHTML = "";
     });
@@ -202,4 +312,5 @@ async function loadCaptainPicks() {
   }
 }
 
+initPlayerModal();
 loadCaptainPicks();
