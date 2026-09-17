@@ -41,6 +41,66 @@ function renderTrendingColumn(title, players) {
   `;
 }
 
+function renderPlayerList(players, options = {}) {
+  const { highlightTop = false, avoidStyle = false } = options;
+
+  const list = document.createElement("ol");
+  list.className = "pick-list";
+
+  players.forEach((player, index) => {
+    const item = document.createElement("li");
+    const isTop = highlightTop && index === 0;
+    item.className = [
+      "pick",
+      isTop ? "pick--top" : "",
+      avoidStyle ? "pick--avoid" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const { className: difficultyClass, label: difficultyLabel } = difficultyInfo(
+      player.difficulty
+    );
+
+    item.innerHTML = `
+      <span class="pick__rank">${index + 1}</span>
+      <span class="pick__main">
+        <span class="pick__name">${player.name}${
+      isTop ? '<span class="pick__badge">Top pick</span>' : ""
+    }</span>
+        <span class="pick__meta">${player.position} · ${player.team} · £${player.price}m${
+      player.reason ? ` · <span class="pick__reason">${player.reason}</span>` : ""
+    }</span>
+      </span>
+      <span class="pick__fixture fixture--${difficultyClass}" title="${difficultyLabel}">
+        ${player.isHome ? "vs" : "@"} ${player.opponent}
+      </span>
+      <span class="pick__form">Form ${player.form.toFixed(1)}</span>
+      <span class="pick__score">${player.score.toFixed(1)}</span>
+    `;
+
+    list.appendChild(item);
+  });
+
+  return list;
+}
+
+function renderSection(sectionId, title, caption, players, options) {
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+
+  if (!players || players.length === 0) {
+    section.innerHTML = "";
+    return;
+  }
+
+  section.innerHTML = `
+    <h2 class="section-heading">${title}</h2>
+    <p class="section-caption">${caption}</p>
+  `;
+  section.appendChild(renderPlayerList(players, options));
+}
+
 function renderTrending(data) {
   const trending = document.getElementById("trending");
   if (!trending) return;
@@ -101,43 +161,31 @@ async function loadCaptainPicks() {
       <span>Score</span>
     `;
 
-    const list = document.createElement("ol");
-    list.className = "pick-list";
-
-    data.picks.forEach((pick, index) => {
-      const item = document.createElement("li");
-      item.className = index === 0 ? "pick pick--top" : "pick";
-
-      const { className: difficultyClass, label: difficultyLabel } = difficultyInfo(
-        pick.difficulty
-      );
-
-      item.innerHTML = `
-        <span class="pick__rank">${index + 1}</span>
-        <span class="pick__main">
-          <span class="pick__name">${pick.name}${
-        index === 0 ? '<span class="pick__badge">Top pick</span>' : ""
-      }</span>
-          <span class="pick__meta">${pick.position} · ${pick.team} · £${pick.price}m</span>
-        </span>
-        <span class="pick__fixture fixture--${difficultyClass}" title="${difficultyLabel}">
-          ${pick.isHome ? "vs" : "@"} ${pick.opponent}
-        </span>
-        <span class="pick__form">Form ${pick.form.toFixed(1)}</span>
-        <span class="pick__score">${pick.score.toFixed(1)}</span>
-      `;
-
-      list.appendChild(item);
-    });
-
     board.innerHTML = "";
     board.appendChild(header);
-    board.appendChild(list);
+    board.appendChild(renderPlayerList(data.picks, { highlightTop: true }));
 
     renderTrending(data);
+    renderSection(
+      "differentials",
+      "Differentials",
+      "Low-ownership players with strong underlying scores — a chance to gain ground on rivals.",
+      data.differentials
+    );
+    renderSection(
+      "avoid",
+      "Think twice about captaining",
+      "Popular picks carrying extra risk this week — captain with caution.",
+      data.avoidThisWeek,
+      { avoidStyle: true }
+    );
   } catch (err) {
     console.error(err);
     board.innerHTML = "";
+    ["trending", "differentials", "avoid"].forEach((id) => {
+      const section = document.getElementById(id);
+      if (section) section.innerHTML = "";
+    });
 
     const errorMessage = document.createElement("p");
     errorMessage.className = "board__error";

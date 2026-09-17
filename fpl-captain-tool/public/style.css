@@ -1,9 +1,9 @@
 :root {
-  --pitch-dark: #0b2e22;
+  --pitch-dark: #000000;
   --pitch-mid: #123b2c;
-  --pitch-line: #1e5240;
-  --chalk: #f1eee3;
-  --sage: #9bb8aa;
+  --pitch-line: #2a2a2a;
+  --chalk: #ffffff;
+  --sage: #b8b8b8;
   --gold: #d8a843;
   --easy: #5da97c;
   --medium: #c9a227;
@@ -125,6 +125,16 @@ main {
   vertical-align: middle;
 }
 
+.pick--avoid {
+  background: rgba(192, 96, 77, 0.08);
+  border-bottom-color: var(--hard);
+}
+
+.pick__reason {
+  color: var(--hard);
+  font-weight: 600;
+}
+
 .pick__rank {
   font-family: var(--font-display);
   font-size: 1.1rem;
@@ -138,7 +148,7 @@ main {
 }
 
 .pick__name {
-  font-weight: 600;
+  font-weight: 700;
   font-size: 1.05rem;
   white-space: nowrap;
   overflow: hidden;
@@ -212,10 +222,26 @@ button:active {
   transform: translateY(1px);
 }
 
-.trending {
+.trending,
+.differentials,
+.avoid {
   margin-top: 3rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--pitch-line);
+}
+
+.section-heading {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.3rem;
+  margin: 0 0 0.4rem;
+}
+
+.section-caption {
+  color: var(--sage);
+  font-size: 0.85rem;
+  margin: 0 0 1.25rem;
+  max-width: 60ch;
 }
 
 .trending__title {
