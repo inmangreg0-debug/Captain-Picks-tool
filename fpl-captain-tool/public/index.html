@@ -19,6 +19,18 @@
   </header>
 
   <main>
+    <section class="player-search" id="player-search">
+      <input
+        type="search"
+        id="player-search-input"
+        class="player-search__input"
+        placeholder="Search any player…"
+        autocomplete="off"
+        aria-label="Search players"
+      />
+      <ul class="player-search__results" id="player-search-results" hidden></ul>
+    </section>
+
     <section class="board" id="board" aria-live="polite">
       <p class="board__loading">Pulling this week's fixtures and form…</p>
     </section>

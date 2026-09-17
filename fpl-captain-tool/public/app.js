@@ -103,7 +103,18 @@ function renderPlayerList(players, options = {}) {
         ${player.isHome ? "vs" : "@"} ${player.opponent}
       </span>
       <span class="pick__form">Form ${player.form.toFixed(1)}</span>
-      <span class="pick__score">${player.score.toFixed(1)}</span>
+      <span class="pick__score">
+        <span class="pick__score-value">${
+          player.trendingDown
+            ? '<span class="pick__trend-down" title="Trending down" aria-label="Trending down">▼</span>'
+            : ""
+        }${player.score.toFixed(1)}</span>
+        ${
+          typeof player.projectedPoints === "number"
+            ? `<span class="pick__proj">Proj: ${player.projectedPoints.toFixed(1)} pts</span>`
+            : ""
+        }
+      </span>
     `;
 
     list.appendChild(item);
@@ -177,9 +188,28 @@ function renderPlayerModalContent(detail) {
     ? detail.nextFive.map((f) => playerFixtureRow(f, "future")).join("")
     : '<tr><td colspan="3">No fixtures scheduled.</td></tr>';
 
+  const photoUrl = playerPhotoUrl(detail);
+  const photoHtml = photoUrl
+    ? `<img class="player-modal__photo" src="${photoUrl}" alt="" loading="lazy" onerror="this.remove()" />`
+    : "";
+
+  const positiveHtml = detail.positiveStat
+    ? `<p class="player-modal__stat player-modal__stat--positive">${detail.positiveStat}</p>`
+    : "";
+  const negativeHtml = detail.negativeStat
+    ? `<p class="player-modal__stat player-modal__stat--negative">${detail.negativeStat}</p>`
+    : "";
+  const reportHtml = detail.report
+    ? `<p class="player-modal__report">${detail.report}</p>`
+    : "";
+
   return `
+    ${photoHtml}
     <h2 id="player-modal-name" class="player-modal__title">${detail.name}</h2>
     <p class="player-modal__meta">${detail.position} · ${detail.team} · Form ${detail.form.toFixed(1)}</p>
+    ${positiveHtml}
+    ${negativeHtml}
+    ${reportHtml}
     <div class="player-modal__section">
       <h3 class="player-modal__heading">Last 5 gameweeks</h3>
       <table class="player-modal__table">
@@ -338,5 +368,81 @@ async function loadCaptainPicks() {
   }
 }
 
+function initPlayerSearch() {
+  const container = document.getElementById("player-search");
+  const input = document.getElementById("player-search-input");
+  const resultsList = document.getElementById("player-search-results");
+  if (!container || !input || !resultsList) return;
+
+  let debounceTimer = null;
+  let requestId = 0;
+
+  function clearResults() {
+    resultsList.innerHTML = "";
+    resultsList.hidden = true;
+  }
+
+  function renderResults(results) {
+    if (!results.length) {
+      clearResults();
+      return;
+    }
+
+    resultsList.innerHTML = results
+      .map(
+        (r) => `
+          <li class="player-search__result">
+            <button type="button" class="player-search__result-btn" data-player-id="${r.id}">
+              ${playerPhotoMarkup(r)}
+              <span class="player-search__result-text">
+                <span class="player-search__result-name">${r.name}</span>
+                <span class="player-search__result-meta">${r.position} · ${r.team}</span>
+              </span>
+            </button>
+          </li>
+        `
+      )
+      .join("");
+    resultsList.hidden = false;
+  }
+
+  input.addEventListener("input", () => {
+    const query = input.value.trim();
+    clearTimeout(debounceTimer);
+
+    if (!query) {
+      clearResults();
+      return;
+    }
+
+    debounceTimer = setTimeout(() => {
+      const thisRequestId = ++requestId;
+      fetch(`/api/players/search?q=${encodeURIComponent(query)}`)
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Request failed"))))
+        .then((data) => {
+          if (thisRequestId !== requestId) return; // a newer search superseded this one
+          renderResults(data.results || []);
+        })
+        .catch(() => {
+          if (thisRequestId !== requestId) return;
+          clearResults();
+        });
+    }, 300);
+  });
+
+  resultsList.addEventListener("click", (e) => {
+    const button = e.target.closest(".player-search__result-btn[data-player-id]");
+    if (!button) return;
+    openPlayerModal(button.dataset.playerId);
+    clearResults();
+    input.value = "";
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!container.contains(e.target)) clearResults();
+  });
+}
+
 initPlayerModal();
+initPlayerSearch();
 loadCaptainPicks();
