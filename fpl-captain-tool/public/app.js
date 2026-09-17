@@ -40,8 +40,42 @@ function teamBadgeMarkup(player) {
   return `<img class="team-badge" src="${player.teamBadge}" alt="" loading="lazy" onerror="this.remove()" />`;
 }
 
+// Reveals players beyond `initialLimit` on click. Returns null (and does
+// nothing) when there aren't more players than the limit to reveal.
+function attachShowAllToggle(listEl, initialLimit) {
+  const items = Array.from(listEl.children);
+  if (items.length <= initialLimit) return null;
+
+  const extra = items.slice(initialLimit);
+  extra.forEach((item) => item.classList.add("is-hidden"));
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "show-all-toggle";
+  toggle.textContent = `Show all (${items.length})`;
+
+  let expanded = false;
+  toggle.addEventListener("click", () => {
+    expanded = !expanded;
+    extra.forEach((item) => item.classList.toggle("is-hidden", !expanded));
+    toggle.textContent = expanded ? "Show less" : `Show all (${items.length})`;
+  });
+
+  return toggle;
+}
+
 function renderTrendingColumn(title, players) {
-  const rows = players
+  const column = document.createElement("div");
+  column.className = "trend__column";
+
+  const heading = document.createElement("h3");
+  heading.className = "trend__heading";
+  heading.textContent = title;
+  column.appendChild(heading);
+
+  const list = document.createElement("ul");
+  list.className = "trend__list";
+  list.innerHTML = players
     .map(
       (player) => `
         <li class="trend__row">
@@ -55,13 +89,12 @@ function renderTrendingColumn(title, players) {
       `
     )
     .join("");
+  column.appendChild(list);
 
-  return `
-    <div class="trend__column">
-      <h3 class="trend__heading">${title}</h3>
-      <ul class="trend__list">${rows}</ul>
-    </div>
-  `;
+  const toggle = attachShowAllToggle(list, 6);
+  if (toggle) column.appendChild(toggle);
+
+  return column;
 }
 
 function renderPlayerList(players, options = {}) {
@@ -123,7 +156,7 @@ function renderPlayerList(players, options = {}) {
   return list;
 }
 
-function renderSection(sectionId, title, caption, players, options) {
+function renderSection(sectionId, title, caption, players, options = {}) {
   const section = document.getElementById(sectionId);
   if (!section) return;
 
@@ -136,7 +169,11 @@ function renderSection(sectionId, title, caption, players, options) {
     <h2 class="section-heading">${title}</h2>
     <p class="section-caption">${caption}</p>
   `;
-  section.appendChild(renderPlayerList(players, options));
+  const list = renderPlayerList(players, options);
+  section.appendChild(list);
+
+  const toggle = attachShowAllToggle(list, options.initialLimit || 6);
+  if (toggle) section.appendChild(toggle);
 }
 
 function renderTrending(data) {
@@ -151,11 +188,13 @@ function renderTrending(data) {
   trending.innerHTML = `
     <h2 class="trending__title">Trending this gameweek</h2>
     <p class="trending__caption">Net transfers in vs. out since the last deadline.</p>
-    <div class="trending__columns">
-      ${renderTrendingColumn("Trending in", data.trendingUp || [])}
-      ${renderTrendingColumn("Trending out", data.trendingDown || [])}
-    </div>
   `;
+
+  const columns = document.createElement("div");
+  columns.className = "trending__columns";
+  columns.appendChild(renderTrendingColumn("Trending in", data.trendingUp || []));
+  columns.appendChild(renderTrendingColumn("Trending out", data.trendingDown || []));
+  trending.appendChild(columns);
 }
 
 function playerFixtureRow(entry, kind) {
@@ -329,7 +368,10 @@ async function loadCaptainPicks() {
 
     board.innerHTML = "";
     board.appendChild(header);
-    board.appendChild(renderPlayerList(data.picks, { highlightTop: true }));
+    const picksList = renderPlayerList(data.picks, { highlightTop: true });
+    board.appendChild(picksList);
+    const picksToggle = attachShowAllToggle(picksList, 6);
+    if (picksToggle) board.appendChild(picksToggle);
 
     renderTrending(data);
     renderSection(
@@ -343,14 +385,14 @@ async function loadCaptainPicks() {
       "Think twice about captaining",
       "Popular picks carrying extra risk this week — captain with caution.",
       data.avoidThisWeek,
-      { avoidStyle: true }
+      { avoidStyle: true, initialLimit: 5 }
     );
     renderSection(
       "out-of-form",
       "Out of form",
       "Still widely owned, but form has dropped — worth a look before your next transfer.",
       data.outOfForm,
-      { mediumStyle: true }
+      { mediumStyle: true, initialLimit: 5 }
     );
   } catch (err) {
     console.error(err);

@@ -97,6 +97,19 @@ function computeTeamGoals(bootstrap) {
   return totals;
 }
 
+// Goals conceded per team, read off goalkeepers only (outfield players'
+// goals_conceded can under/over-count relative to actual team minutes, but
+// a team's GKs collectively track its real defensive record).
+function computeTeamConceded(bootstrap) {
+  const totals = {};
+  bootstrap.elements.forEach((p) => {
+    if (p.element_type === 1) {
+      totals[p.team] = (totals[p.team] || 0) + (p.goals_conceded || 0);
+    }
+  });
+  return totals;
+}
+
 function percentile(sortedAscending, p) {
   if (!sortedAscending.length) return 0;
   const idx = Math.floor(p * (sortedAscending.length - 1));
@@ -184,91 +197,139 @@ function getPlayerFacts(p, position, teamGoalsById, benchmarks, gamesPlayed) {
 
 // --- Written prediction report ----------------------------------------------
 
-function fixtureAdjective(difficulty) {
-  if (difficulty <= 2) return "favorable";
-  if (difficulty >= 4) return "tough";
-  return "even";
-}
-
 function plural(n, singular, pluralWord) {
   return n === 1 ? singular : pluralWord || `${singular}s`;
 }
 
-// Position-specific numeric detail for the written report. Deliberately
-// distinct from positiveStat/negativeStat (the short tag shown above the
-// report) so the report adds new information rather than repeating it.
-function positionStatLine(player) {
-  const name = player.name;
-  const starts = player.starts || 0;
+function capitalize(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
-  if (player.position === "GKP" || player.position === "DEF") {
+// Position-specific numeric clause for the report's opening fact. Returns a
+// subject-less clause (e.g. "kept 2 clean sheets in 4 starts") so callers can
+// drop it after a name, a pronoun, or nothing at all. Deliberately distinct
+// from positiveStat/negativeStat (the short tag shown above the report) so
+// the report adds new information rather than repeating it.
+function statFact(player) {
+  const starts = player.starts || 0;
+  const bonus = player.bonus || 0;
+
+  if (starts === 0) {
+    return `barely featured this season, with zero starts`;
+  }
+
+  if (player.position === "GKP") {
+    const cleanSheets = player.cleanSheets || 0;
+    const saves = player.saves || 0;
+    const goalsConceded = player.goalsConceded || 0;
+    if (cleanSheets > 0) {
+      return `kept ${cleanSheets} clean ${plural(cleanSheets, "sheet")} in ${starts} ${plural(starts, "start")}, conceding just ${goalsConceded}`;
+    }
+    if (saves >= 10) {
+      return `made ${saves} saves across ${starts} ${plural(starts, "start")} behind a shaky defense`;
+    }
+    return `conceded ${goalsConceded} in ${starts} ${plural(starts, "start")} without a clean sheet to show for it`;
+  }
+
+  if (player.position === "DEF") {
     const cleanSheets = player.cleanSheets || 0;
     const goalsConceded = player.goalsConceded || 0;
     if (cleanSheets > 0) {
-      return `${name} has kept ${cleanSheets} clean ${plural(cleanSheets, "sheet")} in ${starts} ${plural(starts, "appearance")}.`;
+      return `kept ${cleanSheets} clean ${plural(cleanSheets, "sheet")} in ${starts} ${plural(starts, "start")}`;
     }
-    if (starts > 0) {
-      return `${name} has conceded ${goalsConceded} in ${starts} ${plural(starts, "start")}.`;
+    if (bonus >= 6) {
+      return `picked up ${bonus} bonus ${plural(bonus, "point")} this season despite going without a clean sheet`;
     }
-    return null;
+    return `conceded ${goalsConceded} in ${starts} ${plural(starts, "start")} without a clean sheet`;
   }
 
-  if (player.position === "MID" || player.position === "FWD") {
-    const goals = player.goalsScored || 0;
-    const assists = player.assists || 0;
-    if (goals + assists >= 2) {
-      return `${name} has ${goals} ${plural(goals, "goal")} and ${assists} ${plural(assists, "assist")} in ${starts} ${plural(starts, "start")}.`;
-    }
-    const ict = player.ictIndex != null ? player.ictIndex : 0;
-    return `Goal involvement has been light, but ${name}'s ICT index of ${ict} points to underlying threat.`;
+  // MID / FWD
+  const goals = player.goalsScored || 0;
+  const assists = player.assists || 0;
+  if (goals + assists >= 2) {
+    return `posted ${goals} ${plural(goals, "goal")} and ${assists} ${plural(assists, "assist")} in ${starts} ${plural(starts, "start")}`;
   }
-
-  return null;
+  if (bonus >= 6) {
+    return `banked ${bonus} bonus ${plural(bonus, "point")} this season despite limited end product in front of goal`;
+  }
+  return `managed just ${goals} ${plural(goals, "goal")} and ${assists} ${plural(assists, "assist")} in ${starts} ${plural(starts, "start")}`;
 }
 
-// Combines fields already computed elsewhere (form, fixture ease, home/away,
-// a position-specific stat line, and the points projection) into a short
-// natural-language summary. Template varies by trend so picks don't all
-// read the same.
+// Ties the opening fact to the upcoming matchup using real opponent numbers
+// (goals scored/conceded per game this season) rather than a generic
+// "favorable fixture" label.
+function matchupClause(player) {
+  const opponent = player.opponent || "their opponent";
+  const isAttacker = player.position === "MID" || player.position === "FWD";
+  const perGame = isAttacker ? player.opponentConcededPerGame : player.opponentGoalsPerGame;
+
+  if (perGame == null) {
+    return `The matchup is rated ${player.difficulty}/5 for difficulty, ${player.isHome ? "at home" : "away"} to ${opponent}`;
+  }
+
+  const value = perGame.toFixed(1);
+  if (isAttacker) {
+    if (player.difficulty <= 2) {
+      return `${opponent}'s defense has been leaky, conceding ${value} a game`;
+    }
+    if (player.difficulty >= 4) {
+      return `${opponent} have held firm at the back, conceding just ${value} a game`;
+    }
+    return `${opponent} are conceding ${value} a game, a fair test either way`;
+  }
+
+  if (player.difficulty >= 4) {
+    return `That record is tested by ${opponent}, who are averaging ${value} goals a game`;
+  }
+  if (player.difficulty <= 2) {
+    return `${opponent} have managed just ${value} goals a game, a kind matchup`;
+  }
+  return `${opponent} are averaging ${value} goals a game, a fair test either way`;
+}
+
+function verdictClause(projectedPoints, trend) {
+  if (projectedPoints >= 7) {
+    return `Projected for ${projectedPoints} points — one of the safer picks on the board`;
+  }
+  if (projectedPoints >= 5) {
+    return trend === "down"
+      ? `Projected for ${projectedPoints} points — worth a punt if the form turns`
+      : `Projected for ${projectedPoints} points — a solid captaincy option`;
+  }
+  if (projectedPoints >= 3.5) {
+    return `Projected for ${projectedPoints} points — a fair squad option, nothing more`;
+  }
+  return `Only ${projectedPoints} points projected — stronger options exist in that price range`;
+}
+
+// Combines a real recent stat, a matchup read using the opponent's actual
+// scoring/conceding rate, and the points projection into a tight, three-
+// sentence analyst-style note. Opener phrasing rotates per player (by id and
+// form) so reports don't all read as "{Name} is/has...".
 function generateReport(player, projectedPoints) {
   const name = player.name;
-  const homeAway = player.isHome ? "home" : "away";
-  const adjective = fixtureAdjective(player.difficulty);
-  const opponent = player.opponent || "their opponent";
   const trend = player.form >= 5 ? "up" : player.form < 3 ? "down" : "neutral";
+  const fact = statFact(player);
 
-  let opening;
-  if (trend === "up") {
-    opening = `${name} is in strong form heading into a ${adjective} ${homeAway} fixture against ${opponent}.`;
-  } else if (trend === "down") {
-    const outlook =
-      adjective === "favorable" ? "winnable on paper" : adjective === "tough" ? "a tough ask" : "a fair test";
-    opening = `${name} has cooled off recently, heading into this ${homeAway} fixture against ${opponent} that looks ${outlook}.`;
-  } else {
-    opening = `${name} has been steady lately heading into a ${adjective} ${homeAway} fixture against ${opponent}.`;
-  }
-
-  const statLine = positionStatLine(player);
-
-  let verdict;
-  if (projectedPoints >= 6) {
-    verdict =
+  const openers = [
+    (f) => `${capitalize(f)}.`,
+    (f) => `He's ${f}.`,
+    (f) =>
       trend === "down"
-        ? `Projected for ${projectedPoints} points — worth a punt despite the dip in form.`
-        : `Projected for ${projectedPoints} points — a strong pick this week.`;
-  } else if (projectedPoints >= 4) {
-    verdict =
-      trend === "up"
-        ? `Projected for ${projectedPoints} points — a solid pick this week.`
-        : `Projected for ${projectedPoints} points — a reasonable option this week.`;
-  } else {
-    verdict =
-      trend === "down"
-        ? `Projected for ${projectedPoints} points — better options are probably available.`
-        : `Projected for ${projectedPoints} points — a low-risk, low-reward pick.`;
-  }
+        ? `Quiet lately, but he's ${f}.`
+        : `${capitalize(f)}, and the underlying numbers back it up.`,
+    (f) => `${name} has ${f}.`,
+  ];
+  const openerIndex = (player.id + Math.floor(player.form)) % openers.length;
+  const opening = openers[openerIndex](fact);
 
-  return [opening, statLine, verdict].filter(Boolean).join(" ");
+  const matchup = matchupClause(player);
+  const verdict = verdictClause(projectedPoints, trend);
+
+  return [opening, matchup, verdict]
+    .filter(Boolean)
+    .map((s) => (/[.!?]$/.test(s) ? s : `${s}.`))
+    .join(" ");
 }
 
 async function getCaptainPicks() {
@@ -318,6 +379,7 @@ async function getCaptainPicks() {
   const OWNERSHIP_AVOID_MIN = 15; // percent — popular enough that a bad week stings
 
   const teamGoalsById = computeTeamGoals(bootstrap);
+  const teamConcededById = computeTeamConceded(bootstrap);
   const benchmarks = computeBenchmarks(bootstrap);
   const gamesPlayed = getGamesPlayed(bootstrap);
 
@@ -374,7 +436,10 @@ async function getCaptainPicks() {
         goalsConceded: p.goals_conceded || 0,
         goalsScored: p.goals_scored || 0,
         assists: p.assists || 0,
-        ictIndex: parseFloat(p.ict_index) || 0,
+        saves: p.saves || 0,
+        bonus: p.bonus || 0,
+        opponentGoalsPerGame: (teamGoalsById[fixture.opponentId] || 0) / gamesPlayed,
+        opponentConcededPerGame: (teamConcededById[fixture.opponentId] || 0) / gamesPlayed,
       };
       player.report = generateReport(player, projectedPoints);
       return player;
@@ -388,7 +453,7 @@ async function getCaptainPicks() {
   const differentials = scoredPlayers
     .filter((p) => parseFloat(p.ownership) < OWNERSHIP_DIFFERENTIAL_MAX)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 6);
+    .slice(0, 15);
 
   // Widely-owned players worth a second thought. This pool intentionally
   // skips the availability/minutes filters above, since injury and rotation
@@ -455,7 +520,10 @@ async function getCaptainPicks() {
         goalsConceded: p.goals_conceded || 0,
         goalsScored: p.goals_scored || 0,
         assists: p.assists || 0,
-        ictIndex: parseFloat(p.ict_index) || 0,
+        saves: p.saves || 0,
+        bonus: p.bonus || 0,
+        opponentGoalsPerGame: (teamGoalsById[fixture.opponentId] || 0) / gamesPlayed,
+        opponentConcededPerGame: (teamConcededById[fixture.opponentId] || 0) / gamesPlayed,
       };
       player.report = generateReport(player, projectedPoints);
       return player;
@@ -467,7 +535,7 @@ async function getCaptainPicks() {
       if (a.flagged !== b.flagged) return a.flagged ? -1 : 1;
       return a.score - b.score;
     })
-    .slice(0, 5)
+    .slice(0, 15)
     .map(({ flagged, ...rest }) => rest);
 
   const OWNERSHIP_OUT_OF_FORM_MIN = 10; // percent — moderate-to-high ownership
@@ -477,7 +545,7 @@ async function getCaptainPicks() {
   const outOfForm = scoredPlayers
     .filter((p) => parseFloat(p.ownership) >= OWNERSHIP_OUT_OF_FORM_MIN)
     .sort((a, b) => a.form - b.form)
-    .slice(0, 5);
+    .slice(0, 15);
 
   // Net transfers this gameweek, used to surface players the crowd is
   // moving in and out of ahead of the deadline.
@@ -490,6 +558,10 @@ async function getCaptainPicks() {
     const isHome = fixture ? fixture.isHome : false;
     const difficulty = fixture ? fixture.difficulty : 3;
     const opponent = opponentTeam ? opponentTeam.short_name : "???";
+    const opponentGoalsPerGame = fixture ? (teamGoalsById[fixture.opponentId] || 0) / gamesPlayed : null;
+    const opponentConcededPerGame = fixture
+      ? (teamConcededById[fixture.opponentId] || 0) / gamesPlayed
+      : null;
     const { positiveStat, negativeStat } = getPlayerFacts(
       p,
       position,
@@ -521,7 +593,10 @@ async function getCaptainPicks() {
       goalsConceded: p.goals_conceded || 0,
       goalsScored: p.goals_scored || 0,
       assists: p.assists || 0,
-      ictIndex: parseFloat(p.ict_index) || 0,
+      saves: p.saves || 0,
+      bonus: p.bonus || 0,
+      opponentGoalsPerGame,
+      opponentConcededPerGame,
     };
     player.report = generateReport(player, projectedPoints);
     return player;
@@ -529,11 +604,11 @@ async function getCaptainPicks() {
 
   const trendingUp = [...transferMovers]
     .sort((a, b) => b.netTransfers - a.netTransfers)
-    .slice(0, 6);
+    .slice(0, 15);
 
   const trendingDown = [...transferMovers]
     .sort((a, b) => a.netTransfers - b.netTransfers)
-    .slice(0, 6);
+    .slice(0, 15);
 
   const result = {
     gameweek: nextEvent.name,
@@ -606,6 +681,7 @@ async function getPlayerDetail(id) {
   });
 
   const teamGoalsById = computeTeamGoals(bootstrap);
+  const teamConcededById = computeTeamConceded(bootstrap);
   const benchmarks = computeBenchmarks(bootstrap);
   const gamesPlayed = getGamesPlayed(bootstrap);
   const { positiveStat, negativeStat } = getPlayerFacts(
@@ -621,11 +697,19 @@ async function getPlayerDetail(id) {
     ? nextFixture.projectedPoints
     : projectPoints({ position, form }, 3, false);
 
+  const nextFixtureRaw = summary.fixtures[0];
+  const nextFixtureOpponentId = nextFixtureRaw
+    ? nextFixtureRaw.is_home
+      ? nextFixtureRaw.team_a
+      : nextFixtureRaw.team_h
+    : null;
+
   const name = `${player.first_name} ${player.second_name}`;
   const formTier = form >= 5 ? "good" : form < 3 ? "bad" : "neutral";
 
   const report = generateReport(
     {
+      id: player.id,
       name,
       position,
       form,
@@ -639,7 +723,12 @@ async function getPlayerDetail(id) {
       goalsConceded: player.goals_conceded || 0,
       goalsScored: player.goals_scored || 0,
       assists: player.assists || 0,
-      ictIndex: parseFloat(player.ict_index) || 0,
+      saves: player.saves || 0,
+      bonus: player.bonus || 0,
+      opponentGoalsPerGame:
+        nextFixtureOpponentId != null ? (teamGoalsById[nextFixtureOpponentId] || 0) / gamesPlayed : null,
+      opponentConcededPerGame:
+        nextFixtureOpponentId != null ? (teamConcededById[nextFixtureOpponentId] || 0) / gamesPlayed : null,
     },
     projectedPoints
   );
