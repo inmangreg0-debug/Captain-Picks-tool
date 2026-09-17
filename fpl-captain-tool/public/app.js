@@ -1,7 +1,71 @@
+function formatNetTransfers(n) {
+  const sign = n >= 0 ? "+" : "−";
+  const abs = Math.abs(n);
+
+  let abbreviated;
+  if (abs >= 1_000_000) {
+    abbreviated = `${(abs / 1_000_000).toFixed(1)}M`;
+  } else if (abs >= 1_000) {
+    abbreviated = `${(abs / 1_000).toFixed(1)}K`;
+  } else {
+    abbreviated = `${abs}`;
+  }
+
+  return `${sign}${abbreviated}`;
+}
+
+function difficultyInfo(difficulty) {
+  if (difficulty <= 2) return { className: "easy", label: "Easy fixture" };
+  if (difficulty >= 4) return { className: "hard", label: "Tough fixture" };
+  return { className: "medium", label: "Medium fixture" };
+}
+
+function renderTrendingColumn(title, players) {
+  const rows = players
+    .map(
+      (player) => `
+        <li class="trend__row">
+          <span class="trend__name">${player.name}</span>
+          <span class="trend__meta">${player.position} · ${player.team} · £${player.price}m</span>
+          <span class="trend__net">${formatNetTransfers(player.netTransfers)}</span>
+        </li>
+      `
+    )
+    .join("");
+
+  return `
+    <div class="trend__column">
+      <h3 class="trend__heading">${title}</h3>
+      <ul class="trend__list">${rows}</ul>
+    </div>
+  `;
+}
+
+function renderTrending(data) {
+  const trending = document.getElementById("trending");
+  if (!trending) return;
+
+  if (!data.trendingUp?.length && !data.trendingDown?.length) {
+    trending.innerHTML = "";
+    return;
+  }
+
+  trending.innerHTML = `
+    <h2 class="trending__title">Trending this gameweek</h2>
+    <p class="trending__caption">Net transfers in vs. out since the last deadline.</p>
+    <div class="trending__columns">
+      ${renderTrendingColumn("Trending in", data.trendingUp || [])}
+      ${renderTrendingColumn("Trending out", data.trendingDown || [])}
+    </div>
+  `;
+}
+
 async function loadCaptainPicks() {
   const board = document.getElementById("board");
   const gameweekLabel = document.getElementById("gameweek-label");
   const deadlineLabel = document.getElementById("deadline-label");
+
+  board.innerHTML = '<p class="board__loading">Pulling this week\'s fixtures and form…</p>';
 
   try {
     const res = await fetch("/api/captain-picks");
@@ -27,23 +91,36 @@ async function loadCaptainPicks() {
       return;
     }
 
+    const header = document.createElement("div");
+    header.className = "pick-header";
+    header.innerHTML = `
+      <span></span>
+      <span>Player</span>
+      <span>Fixture</span>
+      <span>Form</span>
+      <span>Score</span>
+    `;
+
     const list = document.createElement("ol");
     list.className = "pick-list";
 
     data.picks.forEach((pick, index) => {
       const item = document.createElement("li");
-      item.className = "pick";
+      item.className = index === 0 ? "pick pick--top" : "pick";
 
-      const difficultyClass =
-        pick.difficulty <= 2 ? "easy" : pick.difficulty >= 4 ? "hard" : "medium";
+      const { className: difficultyClass, label: difficultyLabel } = difficultyInfo(
+        pick.difficulty
+      );
 
       item.innerHTML = `
         <span class="pick__rank">${index + 1}</span>
         <span class="pick__main">
-          <span class="pick__name">${pick.name}</span>
+          <span class="pick__name">${pick.name}${
+        index === 0 ? '<span class="pick__badge">Top pick</span>' : ""
+      }</span>
           <span class="pick__meta">${pick.position} · ${pick.team} · £${pick.price}m</span>
         </span>
-        <span class="pick__fixture fixture--${difficultyClass}">
+        <span class="pick__fixture fixture--${difficultyClass}" title="${difficultyLabel}">
           ${pick.isHome ? "vs" : "@"} ${pick.opponent}
         </span>
         <span class="pick__form">Form ${pick.form.toFixed(1)}</span>
@@ -54,11 +131,26 @@ async function loadCaptainPicks() {
     });
 
     board.innerHTML = "";
+    board.appendChild(header);
     board.appendChild(list);
+
+    renderTrending(data);
   } catch (err) {
     console.error(err);
-    board.innerHTML =
-      '<p class="board__error">Could not load captain picks right now. Try refreshing in a minute.</p>';
+    board.innerHTML = "";
+
+    const errorMessage = document.createElement("p");
+    errorMessage.className = "board__error";
+    errorMessage.textContent = "Could not load captain picks right now.";
+
+    const retryButton = document.createElement("button");
+    retryButton.type = "button";
+    retryButton.className = "board__retry";
+    retryButton.textContent = "Try again";
+    retryButton.addEventListener("click", loadCaptainPicks);
+
+    board.appendChild(errorMessage);
+    board.appendChild(retryButton);
   }
 }
 

@@ -120,10 +120,33 @@ async function getCaptainPicks() {
     .sort((a, b) => b.score - a.score)
     .slice(0, 15);
 
+  // Net transfers this gameweek, used to surface players the crowd is
+  // moving in and out of ahead of the deadline.
+  const transferMovers = bootstrap.elements.map((p) => {
+    const team = teamsById[p.team];
+    return {
+      name: `${p.first_name} ${p.second_name}`,
+      team: team ? team.name : "Unknown",
+      position: POSITION_NAMES[p.element_type] || "",
+      price: (p.now_cost / 10).toFixed(1),
+      netTransfers: p.transfers_in_event - p.transfers_out_event,
+    };
+  });
+
+  const trendingUp = [...transferMovers]
+    .sort((a, b) => b.netTransfers - a.netTransfers)
+    .slice(0, 6);
+
+  const trendingDown = [...transferMovers]
+    .sort((a, b) => a.netTransfers - b.netTransfers)
+    .slice(0, 6);
+
   const result = {
     gameweek: nextEvent.name,
     deadline: nextEvent.deadline_time,
     picks,
+    trendingUp,
+    trendingDown,
   };
 
   cache = { data: result, expires: Date.now() + CACHE_MS };
