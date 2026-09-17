@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Captain Picks — Gameweek Tool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="masthead">
+    <div class="masthead__inner">
+      <p class="masthead__gw" id="gameweek-label">Loading gameweek…</p>
+      <h1 class="masthead__title">Who to captain this week</h1>
+      <p class="masthead__deadline" id="deadline-label"></p>
+    </div>
+  </header>
+
+  <main>
+    <section class="board" id="board" aria-live="polite">
+      <p class="board__loading">Pulling this week's fixtures and form…</p>
+    </section>
+
+    <section class="explainer">
+      <h2>How this is scored</h2>
+      <p>
+        Every player gets one score built from three things: recent form,
+        how easy their next fixture is, and a small bump for playing at
+        home. No black box — the number next to each name on the right
+        is that total, high to low.
+      </p>
+      <p>
+        Players who are injured, suspended, or barely playing are left
+        off the list entirely.
+      </p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>Data from the official Fantasy Premier League API. Refreshed every 10 minutes.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
