@@ -230,11 +230,13 @@ function renderPlayerModalContent(detail) {
 function openPlayerModal(id) {
   const modal = document.getElementById("player-modal");
   const body = document.getElementById("player-modal-body");
+  const panel = modal ? modal.querySelector(".player-modal__panel") : null;
   if (!modal || !body) return;
 
   modal.hidden = false;
   document.body.classList.add("modal-open");
   body.innerHTML = '<p class="player-modal__loading">Loading player…</p>';
+  if (panel) panel.classList.remove("modal--good", "modal--bad");
 
   fetch(`/api/player/${id}`)
     .then((res) => {
@@ -243,6 +245,11 @@ function openPlayerModal(id) {
     })
     .then((detail) => {
       body.innerHTML = renderPlayerModalContent(detail);
+      if (panel && detail.formTier === "good") {
+        panel.classList.add("modal--good");
+      } else if (panel && detail.formTier === "bad") {
+        panel.classList.add("modal--bad");
+      }
     })
     .catch((err) => {
       console.error(err);

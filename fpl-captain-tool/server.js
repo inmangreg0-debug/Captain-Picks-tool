@@ -190,10 +190,48 @@ function fixtureAdjective(difficulty) {
   return "even";
 }
 
+function plural(n, singular, pluralWord) {
+  return n === 1 ? singular : pluralWord || `${singular}s`;
+}
+
+// Position-specific numeric detail for the written report. Deliberately
+// distinct from positiveStat/negativeStat (the short tag shown above the
+// report) so the report adds new information rather than repeating it.
+function positionStatLine(player) {
+  const name = player.name;
+  const starts = player.starts || 0;
+
+  if (player.position === "GKP" || player.position === "DEF") {
+    const cleanSheets = player.cleanSheets || 0;
+    const goalsConceded = player.goalsConceded || 0;
+    if (cleanSheets > 0) {
+      return `${name} has kept ${cleanSheets} clean ${plural(cleanSheets, "sheet")} in ${starts} ${plural(starts, "appearance")}.`;
+    }
+    if (starts > 0) {
+      return `${name} has conceded ${goalsConceded} in ${starts} ${plural(starts, "start")}.`;
+    }
+    return null;
+  }
+
+  if (player.position === "MID" || player.position === "FWD") {
+    const goals = player.goalsScored || 0;
+    const assists = player.assists || 0;
+    if (goals + assists >= 2) {
+      return `${name} has ${goals} ${plural(goals, "goal")} and ${assists} ${plural(assists, "assist")} in ${starts} ${plural(starts, "start")}.`;
+    }
+    const ict = player.ictIndex != null ? player.ictIndex : 0;
+    return `Goal involvement has been light, but ${name}'s ICT index of ${ict} points to underlying threat.`;
+  }
+
+  return null;
+}
+
 // Combines fields already computed elsewhere (form, fixture ease, home/away,
-// the two trait facts, and the points projection) into a short natural-
-// language summary. Template varies by trend so picks don't all read the same.
+// a position-specific stat line, and the points projection) into a short
+// natural-language summary. Template varies by trend so picks don't all
+// read the same.
 function generateReport(player, projectedPoints) {
+  const name = player.name;
   const homeAway = player.isHome ? "home" : "away";
   const adjective = fixtureAdjective(player.difficulty);
   const opponent = player.opponent || "their opponent";
@@ -201,17 +239,16 @@ function generateReport(player, projectedPoints) {
 
   let opening;
   if (trend === "up") {
-    opening = `In strong form heading into a ${adjective} ${homeAway} fixture against ${opponent}.`;
+    opening = `${name} is in strong form heading into a ${adjective} ${homeAway} fixture against ${opponent}.`;
   } else if (trend === "down") {
     const outlook =
       adjective === "favorable" ? "winnable on paper" : adjective === "tough" ? "a tough ask" : "a fair test";
-    opening = `Form has cooled recently, and this ${homeAway} fixture against ${opponent} looks ${outlook}.`;
+    opening = `${name} has cooled off recently, heading into this ${homeAway} fixture against ${opponent} that looks ${outlook}.`;
   } else {
-    opening = `Steady recent form heading into a ${adjective} ${homeAway} fixture against ${opponent}.`;
+    opening = `${name} has been steady lately heading into a ${adjective} ${homeAway} fixture against ${opponent}.`;
   }
 
-  const rawTrait = player.positiveStat || player.negativeStat || null;
-  const traitLine = rawTrait ? (/[.!?]$/.test(rawTrait) ? rawTrait : `${rawTrait}.`) : null;
+  const statLine = positionStatLine(player);
 
   let verdict;
   if (projectedPoints >= 6) {
@@ -231,7 +268,7 @@ function generateReport(player, projectedPoints) {
         : `Projected for ${projectedPoints} points — a low-risk, low-reward pick.`;
   }
 
-  return [opening, traitLine, verdict].filter(Boolean).join(" ");
+  return [opening, statLine, verdict].filter(Boolean).join(" ");
 }
 
 async function getCaptainPicks() {
@@ -332,6 +369,12 @@ async function getCaptainPicks() {
         negativeStat,
         trendingDown: form < 3,
         projectedPoints,
+        starts: p.starts || 0,
+        cleanSheets: p.clean_sheets || 0,
+        goalsConceded: p.goals_conceded || 0,
+        goalsScored: p.goals_scored || 0,
+        assists: p.assists || 0,
+        ictIndex: parseFloat(p.ict_index) || 0,
       };
       player.report = generateReport(player, projectedPoints);
       return player;
@@ -407,6 +450,12 @@ async function getCaptainPicks() {
         negativeStat,
         trendingDown: form < 3,
         projectedPoints,
+        starts: p.starts || 0,
+        cleanSheets: p.clean_sheets || 0,
+        goalsConceded: p.goals_conceded || 0,
+        goalsScored: p.goals_scored || 0,
+        assists: p.assists || 0,
+        ictIndex: parseFloat(p.ict_index) || 0,
       };
       player.report = generateReport(player, projectedPoints);
       return player;
@@ -467,6 +516,12 @@ async function getCaptainPicks() {
       negativeStat,
       trendingDown: form < 3,
       projectedPoints,
+      starts: p.starts || 0,
+      cleanSheets: p.clean_sheets || 0,
+      goalsConceded: p.goals_conceded || 0,
+      goalsScored: p.goals_scored || 0,
+      assists: p.assists || 0,
+      ictIndex: parseFloat(p.ict_index) || 0,
     };
     player.report = generateReport(player, projectedPoints);
     return player;
@@ -566,21 +621,32 @@ async function getPlayerDetail(id) {
     ? nextFixture.projectedPoints
     : projectPoints({ position, form }, 3, false);
 
+  const name = `${player.first_name} ${player.second_name}`;
+  const formTier = form >= 5 ? "good" : form < 3 ? "bad" : "neutral";
+
   const report = generateReport(
     {
+      name,
+      position,
       form,
       difficulty: nextFixture ? nextFixture.difficulty : 3,
       isHome: nextFixture ? nextFixture.isHome : false,
       opponent: nextFixture ? nextFixture.opponent : null,
       positiveStat,
       negativeStat,
+      starts: player.starts || 0,
+      cleanSheets: player.clean_sheets || 0,
+      goalsConceded: player.goals_conceded || 0,
+      goalsScored: player.goals_scored || 0,
+      assists: player.assists || 0,
+      ictIndex: parseFloat(player.ict_index) || 0,
     },
     projectedPoints
   );
 
   return {
     id: player.id,
-    name: `${player.first_name} ${player.second_name}`,
+    name,
     team: team ? team.name : "Unknown",
     position,
     form,
@@ -589,6 +655,7 @@ async function getPlayerDetail(id) {
     positiveStat,
     negativeStat,
     trendingDown: form < 3,
+    formTier,
     projectedPoints,
     report,
     lastFive,

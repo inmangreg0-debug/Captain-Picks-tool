@@ -603,6 +603,22 @@ body.modal-open {
   padding: 1.5rem 1.5rem 2rem;
 }
 
+.player-modal__panel.modal--good {
+  background: linear-gradient(var(--pitch-mid), var(--pitch-mid)),
+    linear-gradient(rgba(93, 169, 124, 0.15), rgba(93, 169, 124, 0.15));
+  background-blend-mode: normal;
+  border: 1px solid var(--easy);
+  border-bottom: none;
+}
+
+.player-modal__panel.modal--bad {
+  background: linear-gradient(var(--pitch-mid), var(--pitch-mid)),
+    linear-gradient(rgba(192, 96, 77, 0.15), rgba(192, 96, 77, 0.15));
+  background-blend-mode: normal;
+  border: 1px solid var(--hard);
+  border-bottom: none;
+}
+
 .player-modal__close {
   position: sticky;
   float: right;
