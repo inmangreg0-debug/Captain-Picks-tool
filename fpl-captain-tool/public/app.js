@@ -1,3 +1,16 @@
+const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const POSITIONS = ["All", "GKP", "DEF", "MID", "FWD"];
+const SORT_OPTIONS = [
+  { key: "score", label: "Score" },
+  { key: "price", label: "Price" },
+  { key: "ownership", label: "Ownership" },
+];
+
+let allPicks = [];
+let boardFilter = "All";
+let boardSort = "score";
+
 function formatNetTransfers(n) {
   const sign = n >= 0 ? "+" : "−";
   const abs = Math.abs(n);
@@ -57,11 +70,60 @@ function attachShowAllToggle(listEl, initialLimit) {
   let expanded = false;
   toggle.addEventListener("click", () => {
     expanded = !expanded;
-    extra.forEach((item) => item.classList.toggle("is-hidden", !expanded));
+    if (expanded) {
+      extra.forEach((item, i) => {
+        item.classList.remove("is-hidden");
+        if (!REDUCED_MOTION) {
+          item.classList.remove("reveal-in");
+          item.style.animationDelay = `${Math.min(i * 50, 400)}ms`;
+          void item.offsetWidth; // restart the animation on repeat expands
+          item.classList.add("reveal-in");
+        }
+      });
+    } else {
+      extra.forEach((item) => {
+        item.classList.add("is-hidden");
+        item.classList.remove("reveal-in");
+      });
+    }
     toggle.textContent = expanded ? "Show less" : `Show all (${items.length})`;
   });
 
   return toggle;
+}
+
+function skeletonPickRow() {
+  return `
+    <li class="pick skeleton-pick">
+      <span class="skeleton skeleton-pick__rank"></span>
+      <span class="skeleton-pick__main">
+        <span class="skeleton skeleton-pick__avatar"></span>
+        <span class="skeleton-pick__text">
+          <span class="skeleton skeleton-pick__name"></span>
+          <span class="skeleton skeleton-pick__meta"></span>
+        </span>
+      </span>
+      <span class="skeleton skeleton-pick__fixture"></span>
+      <span class="skeleton skeleton-pick__form"></span>
+      <span class="skeleton skeleton-pick__score"></span>
+    </li>
+  `;
+}
+
+function renderSkeletonList(count) {
+  return `<ol class="pick-list skeleton-list">${Array.from({ length: count }, skeletonPickRow).join("")}</ol>`;
+}
+
+function renderSkeletonBoard(count = 6) {
+  return renderSkeletonList(count);
+}
+
+function renderSkeletonSection(count = 3) {
+  return `
+    <span class="skeleton skeleton-section-title"></span>
+    <span class="skeleton skeleton-section-caption"></span>
+    ${renderSkeletonList(count)}
+  `;
 }
 
 function renderTrendingColumn(title, players) {
@@ -140,6 +202,8 @@ function renderPlayerList(players, options = {}) {
         <span class="pick__score-value">${
           player.trendingDown
             ? '<span class="pick__trend-down" title="Trending down" aria-label="Trending down">▼</span>'
+            : player.trendingUp
+            ? '<span class="pick__trend-up" title="Trending up" aria-label="Trending up">▲</span>'
             : ""
         }${player.score.toFixed(1)}</span>
         ${
@@ -154,6 +218,99 @@ function renderPlayerList(players, options = {}) {
   });
 
   return list;
+}
+
+function getFilteredSortedPicks() {
+  const filtered =
+    boardFilter === "All" ? allPicks : allPicks.filter((p) => p.position === boardFilter);
+
+  const sorted = [...filtered];
+  if (boardSort === "price") {
+    sorted.sort((a, b) => parseFloat(b.price) - parseFloat(a.price));
+  } else if (boardSort === "ownership") {
+    sorted.sort((a, b) => parseFloat(b.ownership) - parseFloat(a.ownership));
+  } else {
+    sorted.sort((a, b) => b.score - a.score);
+  }
+  return sorted;
+}
+
+function renderBoardControls(container) {
+  const controls = document.createElement("div");
+  controls.className = "board-controls";
+
+  const chipsWrap = document.createElement("div");
+  chipsWrap.className = "filter-chips";
+  chipsWrap.setAttribute("role", "group");
+  chipsWrap.setAttribute("aria-label", "Filter by position");
+  POSITIONS.forEach((pos) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "filter-chip" + (boardFilter === pos ? " is-active" : "");
+    chip.textContent = pos;
+    chip.addEventListener("click", () => {
+      if (boardFilter === pos) return;
+      boardFilter = pos;
+      renderBoard();
+    });
+    chipsWrap.appendChild(chip);
+  });
+
+  const sortWrap = document.createElement("div");
+  sortWrap.className = "sort-toggle";
+  sortWrap.setAttribute("role", "group");
+  sortWrap.setAttribute("aria-label", "Sort by");
+  SORT_OPTIONS.forEach(({ key, label }) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sort-btn" + (boardSort === key ? " is-active" : "");
+    btn.textContent = label;
+    btn.addEventListener("click", () => {
+      if (boardSort === key) return;
+      boardSort = key;
+      renderBoard();
+    });
+    sortWrap.appendChild(btn);
+  });
+
+  controls.appendChild(chipsWrap);
+  controls.appendChild(sortWrap);
+  container.appendChild(controls);
+}
+
+function renderBoard() {
+  const board = document.getElementById("board");
+  if (!board) return;
+
+  board.innerHTML = "";
+  renderBoardControls(board);
+
+  const filtered = getFilteredSortedPicks();
+
+  if (filtered.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "board__empty";
+    empty.textContent = "No players match this filter.";
+    board.appendChild(empty);
+    return;
+  }
+
+  const header = document.createElement("div");
+  header.className = "pick-header";
+  header.innerHTML = `
+    <span></span>
+    <span>Player</span>
+    <span>Fixture</span>
+    <span>Form</span>
+    <span>Score</span>
+  `;
+  board.appendChild(header);
+
+  const highlightTop = boardFilter === "All" && boardSort === "score";
+  const picksList = renderPlayerList(filtered, { highlightTop });
+  board.appendChild(picksList);
+  const picksToggle = attachShowAllToggle(picksList, 6);
+  if (picksToggle) board.appendChild(picksToggle);
 }
 
 function renderSection(sectionId, title, caption, players, options = {}) {
@@ -277,6 +434,10 @@ function openPlayerModal(id) {
   body.innerHTML = '<p class="player-modal__loading">Loading player…</p>';
   if (panel) panel.classList.remove("modal--good", "modal--bad");
 
+  requestAnimationFrame(() => {
+    modal.classList.add("is-open");
+  });
+
   fetch(`/api/player/${id}`)
     .then((res) => {
       if (!res.ok) throw new Error("Request failed");
@@ -301,9 +462,20 @@ function closePlayerModal() {
   const modal = document.getElementById("player-modal");
   const body = document.getElementById("player-modal-body");
   if (!modal) return;
-  modal.hidden = true;
+
+  modal.classList.remove("is-open");
   document.body.classList.remove("modal-open");
-  if (body) body.innerHTML = "";
+
+  const finish = () => {
+    modal.hidden = true;
+    if (body) body.innerHTML = "";
+  };
+
+  if (REDUCED_MOTION) {
+    finish();
+  } else {
+    setTimeout(finish, 200);
+  }
 }
 
 function initPlayerModal() {
@@ -330,7 +502,11 @@ async function loadCaptainPicks() {
   const gameweekLabel = document.getElementById("gameweek-label");
   const deadlineLabel = document.getElementById("deadline-label");
 
-  board.innerHTML = '<p class="board__loading">Pulling this week\'s fixtures and form…</p>';
+  board.innerHTML = renderSkeletonBoard(6);
+  ["trending", "differentials", "avoid", "out-of-form"].forEach((id) => {
+    const section = document.getElementById(id);
+    if (section) section.innerHTML = renderSkeletonSection(3);
+  });
 
   try {
     const res = await fetch("/api/captain-picks");
@@ -351,27 +527,16 @@ async function loadCaptainPicks() {
     }
 
     if (!data.picks || data.picks.length === 0) {
+      allPicks = [];
       board.innerHTML =
         '<p class="board__empty">No picks available yet — check back closer to the deadline.</p>';
       return;
     }
 
-    const header = document.createElement("div");
-    header.className = "pick-header";
-    header.innerHTML = `
-      <span></span>
-      <span>Player</span>
-      <span>Fixture</span>
-      <span>Form</span>
-      <span>Score</span>
-    `;
-
-    board.innerHTML = "";
-    board.appendChild(header);
-    const picksList = renderPlayerList(data.picks, { highlightTop: true });
-    board.appendChild(picksList);
-    const picksToggle = attachShowAllToggle(picksList, 6);
-    if (picksToggle) board.appendChild(picksToggle);
+    allPicks = data.picks;
+    boardFilter = "All";
+    boardSort = "score";
+    renderBoard();
 
     renderTrending(data);
     renderSection(
@@ -396,6 +561,7 @@ async function loadCaptainPicks() {
     );
   } catch (err) {
     console.error(err);
+    allPicks = [];
     board.innerHTML = "";
     ["trending", "differentials", "avoid", "out-of-form"].forEach((id) => {
       const section = document.getElementById(id);
@@ -492,6 +658,78 @@ function initPlayerSearch() {
   });
 }
 
+function initPullToRefresh() {
+  if (!("ontouchstart" in window)) return;
+
+  const THRESHOLD = 70;
+  let startY = null;
+  let pulling = false;
+  let indicator = null;
+
+  function createIndicator() {
+    const el = document.createElement("div");
+    el.className = "ptr-indicator";
+    el.innerHTML = '<span class="ptr-spinner"></span>';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function removeIndicator() {
+    if (indicator) {
+      indicator.remove();
+      indicator = null;
+    }
+  }
+
+  document.addEventListener(
+    "touchstart",
+    (e) => {
+      if (window.scrollY > 0 || document.body.classList.contains("modal-open")) {
+        startY = null;
+        return;
+      }
+      startY = e.touches[0].clientY;
+      pulling = false;
+    },
+    { passive: true }
+  );
+
+  document.addEventListener(
+    "touchmove",
+    (e) => {
+      if (startY === null || window.scrollY > 0) return;
+      const delta = e.touches[0].clientY - startY;
+      if (delta > 10) {
+        pulling = true;
+        if (!indicator) indicator = createIndicator();
+        const pull = Math.min(delta, THRESHOLD * 1.5);
+        indicator.style.opacity = String(Math.min(pull / THRESHOLD, 1));
+        indicator.classList.toggle("is-ready", pull >= THRESHOLD);
+      }
+    },
+    { passive: true }
+  );
+
+  document.addEventListener("touchend", (e) => {
+    if (!pulling || startY === null) {
+      startY = null;
+      return;
+    }
+
+    const delta = e.changedTouches[0].clientY - startY;
+    pulling = false;
+    startY = null;
+
+    if (delta >= THRESHOLD) {
+      if (indicator) indicator.classList.add("is-loading");
+      loadCaptainPicks().finally(removeIndicator);
+    } else {
+      removeIndicator();
+    }
+  });
+}
+
 initPlayerModal();
 initPlayerSearch();
+initPullToRefresh();
 loadCaptainPicks();

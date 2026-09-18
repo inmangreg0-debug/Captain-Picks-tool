@@ -354,6 +354,12 @@ main {
   font-size: 0.9rem;
 }
 
+.pick__trend-up {
+  color: var(--easy);
+  margin-right: 0.2rem;
+  font-size: 0.9rem;
+}
+
 .pick__proj {
   font-size: 0.75rem;
   color: var(--sage);
@@ -362,6 +368,198 @@ main {
 
 .board__retry {
   margin-top: 0.75rem;
+}
+
+.board-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.filter-chips,
+.sort-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.filter-chip,
+.sort-btn {
+  min-height: 32px;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--pitch-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--sage);
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease-out, color 0.15s ease-out, background 0.15s ease-out;
+}
+
+.filter-chip.is-active,
+.sort-btn.is-active {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(216, 168, 67, 0.1);
+}
+
+.filter-chip:active,
+.sort-btn:active {
+  transform: none;
+}
+
+/* --- Skeleton loading placeholders --- */
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.skeleton {
+  display: inline-block;
+  background: var(--pitch-line);
+  border-radius: 4px;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-list {
+  border-top: 1px solid var(--pitch-line);
+}
+
+.skeleton-pick__rank {
+  width: 1.1rem;
+  height: 1rem;
+}
+
+.skeleton-pick__main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.skeleton-pick__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.skeleton-pick__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1;
+}
+
+.skeleton-pick__name {
+  width: 65%;
+  height: 0.95rem;
+}
+
+.skeleton-pick__meta {
+  width: 40%;
+  height: 0.7rem;
+}
+
+.skeleton-pick__fixture {
+  width: 3rem;
+  height: 1.3rem;
+}
+
+.skeleton-pick__form {
+  width: 2.5rem;
+  height: 0.85rem;
+}
+
+.skeleton-pick__score {
+  width: 2.2rem;
+  height: 1.3rem;
+}
+
+.skeleton-section-title {
+  display: block;
+  width: 40%;
+  max-width: 220px;
+  height: 1.3rem;
+  margin: 0 0 0.6rem;
+}
+
+.skeleton-section-caption {
+  display: block;
+  width: 70%;
+  max-width: 340px;
+  height: 0.85rem;
+  margin: 0 0 1.25rem;
+}
+
+/* --- Show-all reveal stagger --- */
+
+@keyframes revealIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.reveal-in {
+  animation: revealIn 200ms ease-out both;
+}
+
+/* --- Pull-to-refresh --- */
+
+.ptr-indicator {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--pitch-mid);
+  border: 1px solid var(--pitch-line);
+  opacity: 0;
+  transition: opacity 0.15s ease-out, border-color 0.15s ease-out;
+}
+
+.ptr-indicator.is-ready {
+  border-color: var(--gold);
+}
+
+.ptr-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--pitch-line);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+}
+
+.ptr-indicator.is-loading .ptr-spinner {
+  animation: ptr-spin 0.7s linear infinite;
+}
+
+@keyframes ptr-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 button {
@@ -611,6 +809,12 @@ body.modal-open {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.7);
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+
+.player-modal.is-open .player-modal__backdrop {
+  opacity: 1;
 }
 
 .player-modal__panel {
@@ -624,6 +828,14 @@ body.modal-open {
   border-bottom: none;
   border-radius: 12px 12px 0 0;
   padding: 1.5rem 1.5rem 2rem;
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+}
+
+.player-modal.is-open .player-modal__panel {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .player-modal__panel.modal--good {

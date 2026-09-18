@@ -65,6 +65,81 @@ async function fetchJSON(url) {
   return res.json();
 }
 
+// --- Underlying-quality score ------------------------------------------------
+//
+// Both `score` (picks ranking) and `projectPoints` (points estimate) used to
+// run on raw recent `form` alone, which can overreact to a single big or bad
+// game. `qualityScore` blends that recent form with steadier signals so one
+// wild match doesn't swing a player's number too far:
+//  - points_per_game (season-long average) tempers a short hot/cold streak
+//  - expected-goal involvements (xG + xA per 90) for MID/FWD — a better read
+//    on a player's real chance quality than a handful of results
+//  - expected goals conceded per 90 for GKP/DEF — a better clean-sheet-odds
+//    signal than what literally went in, since it reflects the defense's
+//    true quality against rather than a few bounces of the ball
+//
+// Falls back to blended form alone when FPL hasn't published xG data yet for
+// a player, rather than treating a missing stat as a zero (which would
+// otherwise look like a perfect defense or a total goal threat blank).
+const FORM_RECENCY_WEIGHT = 0.6; // recent form
+const FORM_SEASON_WEIGHT = 0.4; // points_per_game (season-long)
+
+const XGI_WEIGHT = 1.15; // xG involvement counts slightly more than blended form
+const XGC_WEIGHT = 1; // xG conceded counts about the same as blended form
+const XG_SCALE = 10; // puts per-90 xG rates (~0–1) on FPL's 0–10 form scale
+const XGC_BREAKEVEN = 1.5; // ~per-match expected goals conceded that's "average"
+
+// Recent form blended with season-long points_per_game, so one huge or awful
+// match doesn't swing a player's number too far. This is the one blended
+// "how good is this player right now" number — qualityScore folds in xG on
+// top of it for scoring/projections, and getFormStatus (below) buckets it
+// for the trend arrows, the out-of-form list, and the modal's green/red tint.
+function blendedForm(p) {
+  const form = parseFloat(p.form) || 0;
+  const pointsPerGame = parseFloat(p.points_per_game) || 0;
+  return form * FORM_RECENCY_WEIGHT + pointsPerGame * FORM_SEASON_WEIGHT;
+}
+
+function qualityScore(p, position) {
+  const form = blendedForm(p);
+
+  if (position === "MID" || position === "FWD") {
+    const xgi = parseFloat(p.expected_goal_involvements_per_90);
+    if (!Number.isFinite(xgi)) return form;
+    const xgiScore = xgi * XG_SCALE;
+    return (form + xgiScore * XGI_WEIGHT) / (1 + XGI_WEIGHT);
+  }
+
+  if (position === "GKP" || position === "DEF") {
+    const xgc = parseFloat(p.expected_goals_conceded_per_90);
+    if (!Number.isFinite(xgc)) return form;
+    const xgcScore = Math.max(0, XGC_BREAKEVEN - xgc) * XG_SCALE;
+    return (form + xgcScore * XGC_WEIGHT) / (1 + XGC_WEIGHT);
+  }
+
+  return form;
+}
+
+// --- Form status -------------------------------------------------------
+//
+// Single source of truth for whether a player counts as trending up,
+// trending down, or neither. This used to be computed separately in four
+// places with four different thresholds (trend arrows at raw form >=6/<3,
+// the modal's green/red tint at raw form >=5/<3, the out-of-form cut at raw
+// form <5) — so a player could show a green modal while getting no trend
+// arrow in the picks list, or land in the out-of-form section without the
+// modal ever calling them "bad". Everything now reads blendedForm(p) against
+// one pair of thresholds.
+const FORM_STATUS_GOOD_MIN = 5;
+const FORM_STATUS_BAD_MAX = 3;
+
+function getFormStatus(p) {
+  const value = blendedForm(p);
+  if (value >= FORM_STATUS_GOOD_MIN) return "good";
+  if (value < FORM_STATUS_BAD_MAX) return "bad";
+  return "neutral";
+}
+
 // --- Points projection -----------------------------------------------------
 //
 // One source of truth for "how many points is this player likely to get in
@@ -73,14 +148,14 @@ async function fetchJSON(url) {
 // which is a relative ranking number, not a points estimate.
 function projectPoints(player, fixtureDifficulty, isHome) {
   const APPEARANCE_BASE = 2;
-  const FORM_WEIGHT = 0.6;
+  const QUALITY_WEIGHT = 0.6;
   const HOME_BONUS = 0.3;
   const isDefensive = player.position === "GKP" || player.position === "DEF";
   const fixtureMultiplier = isDefensive ? 0.35 : 0.22; // clean sheets swing more on fixture ease
 
   const total =
     APPEARANCE_BASE +
-    (player.form || 0) * FORM_WEIGHT +
+    (player.quality || 0) * QUALITY_WEIGHT +
     (6 - fixtureDifficulty) * fixtureMultiplier +
     (isHome ? HOME_BONUS : 0);
 
@@ -375,6 +450,7 @@ async function getCaptainPicks() {
     }
   });
 
+  const POSITION_ORDER = ["GKP", "DEF", "MID", "FWD"];
   const OWNERSHIP_DIFFERENTIAL_MAX = 10; // percent — "nobody has them" territory
   const OWNERSHIP_AVOID_MIN = 15; // percent — popular enough that a bad week stings
 
@@ -397,10 +473,12 @@ async function getCaptainPicks() {
 
       const position = POSITION_NAMES[p.element_type] || "";
       const form = parseFloat(p.form) || 0;
+      const quality = qualityScore(p, position);
+      const formStatus = getFormStatus(p);
       const fixtureScore = 6 - fixture.difficulty; // difficulty 1 (easy) -> 5, 5 (hard) -> 1
       const homeBonus = fixture.isHome ? 0.5 : 0;
       const score =
-        Math.round((form + fixtureScore * FIXTURE_WEIGHT + homeBonus) * 10) / 10;
+        Math.round((quality + fixtureScore * FIXTURE_WEIGHT + homeBonus) * 10) / 10;
 
       const team = teamsById[p.team];
       const opponent = teamsById[fixture.opponentId];
@@ -411,7 +489,7 @@ async function getCaptainPicks() {
         benchmarks,
         gamesPlayed
       );
-      const projectedPoints = projectPoints({ position, form }, fixture.difficulty, fixture.isHome);
+      const projectedPoints = projectPoints({ position, quality }, fixture.difficulty, fixture.isHome);
 
       const player = {
         id: p.id,
@@ -429,7 +507,9 @@ async function getCaptainPicks() {
         teamBadge: teamBadgeUrl(team),
         positiveStat,
         negativeStat,
-        trendingDown: form < 3,
+        formStatus,
+        trendingDown: formStatus === "bad",
+        trendingUp: formStatus === "good",
         projectedPoints,
         starts: p.starts || 0,
         cleanSheets: p.clean_sheets || 0,
@@ -446,14 +526,31 @@ async function getCaptainPicks() {
     })
     .filter(Boolean);
 
-  const picks = [...scoredPlayers].sort((a, b) => b.score - a.score).slice(0, 15);
+  // Top 15 per position, merged, rather than a single top-15-overall cut —
+  // keeps every position fully represented so the position filter chips on
+  // the frontend have real depth to show instead of whatever survived an
+  // overall cross-position cut.
+  const picks = POSITION_ORDER.flatMap((pos) =>
+    scoredPlayers
+      .filter((p) => p.position === pos)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 15)
+  );
+
+  const DIFFERENTIALS_GKP_CAP = 2; // squads only carry 1-2 keepers — don't let GKP crowd out DEF/MID/FWD
 
   // Low-ownership players from the same pool who are still scoring well —
-  // a chance to gain ground on the rest of your mini-league.
-  const differentials = scoredPlayers
-    .filter((p) => parseFloat(p.ownership) < OWNERSHIP_DIFFERENTIAL_MAX)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 15);
+  // a chance to gain ground on the rest of your mini-league. Built from
+  // scoredPlayers, so it already inherits that pool's minutes >= 180 filter.
+  // Same per-position depth treatment as `picks` above, except goalkeepers
+  // are capped at 2 (a realistic squad need) so the section isn't just a
+  // wall of similarly-scored keepers.
+  const differentials = POSITION_ORDER.flatMap((pos) =>
+    scoredPlayers
+      .filter((p) => p.position === pos && parseFloat(p.ownership) < OWNERSHIP_DIFFERENTIAL_MAX)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, pos === "GKP" ? DIFFERENTIALS_GKP_CAP : 15)
+  );
 
   // Widely-owned players worth a second thought. This pool intentionally
   // skips the availability/minutes filters above, since injury and rotation
@@ -466,10 +563,12 @@ async function getCaptainPicks() {
 
       const position = POSITION_NAMES[p.element_type] || "";
       const form = parseFloat(p.form) || 0;
+      const quality = qualityScore(p, position);
+      const formStatus = getFormStatus(p);
       const fixtureScore = 6 - fixture.difficulty;
       const homeBonus = fixture.isHome ? 0.5 : 0;
       const score =
-        Math.round((form + fixtureScore * FIXTURE_WEIGHT + homeBonus) * 10) / 10;
+        Math.round((quality + fixtureScore * FIXTURE_WEIGHT + homeBonus) * 10) / 10;
 
       const team = teamsById[p.team];
       const opponent = teamsById[fixture.opponentId];
@@ -493,7 +592,7 @@ async function getCaptainPicks() {
         benchmarks,
         gamesPlayed
       );
-      const projectedPoints = projectPoints({ position, form }, fixture.difficulty, fixture.isHome);
+      const projectedPoints = projectPoints({ position, quality }, fixture.difficulty, fixture.isHome);
 
       const player = {
         id: p.id,
@@ -513,7 +612,9 @@ async function getCaptainPicks() {
         teamBadge: teamBadgeUrl(team),
         positiveStat,
         negativeStat,
-        trendingDown: form < 3,
+        formStatus,
+        trendingDown: formStatus === "bad",
+        trendingUp: formStatus === "good",
         projectedPoints,
         starts: p.starts || 0,
         cleanSheets: p.clean_sheets || 0,
@@ -538,14 +639,21 @@ async function getCaptainPicks() {
     .slice(0, 15)
     .map(({ flagged, ...rest }) => rest);
 
-  const OWNERSHIP_OUT_OF_FORM_MIN = 10; // percent — moderate-to-high ownership
-
-  // Regularly-playing, still widely-owned players whose form has dropped —
-  // a sustained trend, unlike avoidThisWeek's single-gameweek risk flags.
-  const outOfForm = scoredPlayers
-    .filter((p) => parseFloat(p.ownership) >= OWNERSHIP_OUT_OF_FORM_MIN)
-    .sort((a, b) => a.form - b.form)
-    .slice(0, 15);
+  // Regularly-playing players whose form has genuinely dropped — a sustained
+  // trend, unlike avoidThisWeek's single-gameweek risk flags. Filters on
+  // formStatus (the same getFormStatus() result driving the trend arrows and
+  // the modal's tint) rather than a separate form cutoff, so a player can't
+  // be flagged out-of-form here while showing green everywhere else.
+  // Ownership is intentionally NOT a filter here (only minutes, via
+  // scoredPlayers, and form are) — requiring >=10% ownership on top of "bad"
+  // form very nearly empties this section, since players who are genuinely
+  // out of form are exactly the ones managers have already transferred out.
+  const outOfForm = POSITION_ORDER.flatMap((pos) =>
+    scoredPlayers
+      .filter((p) => p.position === pos && p.formStatus === "bad")
+      .sort((a, b) => a.form - b.form)
+      .slice(0, 15)
+  );
 
   // Net transfers this gameweek, used to surface players the crowd is
   // moving in and out of ahead of the deadline.
@@ -554,6 +662,8 @@ async function getCaptainPicks() {
     const position = POSITION_NAMES[p.element_type] || "";
     const fixture = teamFixture[p.team];
     const form = parseFloat(p.form) || 0;
+    const quality = qualityScore(p, position);
+    const formStatus = getFormStatus(p);
     const opponentTeam = fixture ? teamsById[fixture.opponentId] : null;
     const isHome = fixture ? fixture.isHome : false;
     const difficulty = fixture ? fixture.difficulty : 3;
@@ -569,7 +679,7 @@ async function getCaptainPicks() {
       benchmarks,
       gamesPlayed
     );
-    const projectedPoints = projectPoints({ position, form }, difficulty, isHome);
+    const projectedPoints = projectPoints({ position, quality }, difficulty, isHome);
 
     const player = {
       id: p.id,
@@ -586,7 +696,9 @@ async function getCaptainPicks() {
       difficulty,
       positiveStat,
       negativeStat,
-      trendingDown: form < 3,
+      formStatus,
+      trendingDown: formStatus === "bad",
+      trendingUp: formStatus === "good",
       projectedPoints,
       starts: p.starts || 0,
       cleanSheets: p.clean_sheets || 0,
@@ -650,6 +762,8 @@ async function getPlayerDetail(id) {
   const summary = await fetchJSON(`${FPL_BASE}/element-summary/${id}/`);
   const form = parseFloat(player.form) || 0;
   const position = POSITION_NAMES[player.element_type] || "";
+  const quality = qualityScore(player, position);
+  const formStatus = getFormStatus(player);
   const team = teamsById[player.team];
 
   const lastFive = summary.history
@@ -670,7 +784,7 @@ async function getPlayerDetail(id) {
   const nextFive = summary.fixtures.slice(0, 5).map((f) => {
     const opponentId = f.is_home ? f.team_a : f.team_h;
     const opponent = teamsById[opponentId];
-    const projectedPoints = projectPoints({ position, form }, f.difficulty, f.is_home);
+    const projectedPoints = projectPoints({ position, quality }, f.difficulty, f.is_home);
 
     return {
       opponent: opponent ? opponent.short_name : "???",
@@ -695,7 +809,7 @@ async function getPlayerDetail(id) {
   const nextFixture = nextFive[0];
   const projectedPoints = nextFixture
     ? nextFixture.projectedPoints
-    : projectPoints({ position, form }, 3, false);
+    : projectPoints({ position, quality }, 3, false);
 
   const nextFixtureRaw = summary.fixtures[0];
   const nextFixtureOpponentId = nextFixtureRaw
@@ -705,7 +819,6 @@ async function getPlayerDetail(id) {
     : null;
 
   const name = `${player.first_name} ${player.second_name}`;
-  const formTier = form >= 5 ? "good" : form < 3 ? "bad" : "neutral";
 
   const report = generateReport(
     {
@@ -743,8 +856,10 @@ async function getPlayerDetail(id) {
     teamBadge: teamBadgeUrl(team),
     positiveStat,
     negativeStat,
-    trendingDown: form < 3,
-    formTier,
+    formStatus,
+    trendingDown: formStatus === "bad",
+    trendingUp: formStatus === "good",
+    formTier: formStatus,
     projectedPoints,
     report,
     lastFive,

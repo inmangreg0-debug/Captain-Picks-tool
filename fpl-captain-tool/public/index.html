@@ -32,7 +32,86 @@
     </section>
 
     <section class="board" id="board" aria-live="polite">
-      <p class="board__loading">Pulling this week's fixtures and form…</p>
+      <ol class="pick-list skeleton-list">
+        <li class="pick skeleton-pick">
+          <span class="skeleton skeleton-pick__rank"></span>
+          <span class="skeleton-pick__main">
+            <span class="skeleton skeleton-pick__avatar"></span>
+            <span class="skeleton-pick__text">
+              <span class="skeleton skeleton-pick__name"></span>
+              <span class="skeleton skeleton-pick__meta"></span>
+            </span>
+          </span>
+          <span class="skeleton skeleton-pick__fixture"></span>
+          <span class="skeleton skeleton-pick__form"></span>
+          <span class="skeleton skeleton-pick__score"></span>
+        </li>
+        <li class="pick skeleton-pick">
+          <span class="skeleton skeleton-pick__rank"></span>
+          <span class="skeleton-pick__main">
+            <span class="skeleton skeleton-pick__avatar"></span>
+            <span class="skeleton-pick__text">
+              <span class="skeleton skeleton-pick__name"></span>
+              <span class="skeleton skeleton-pick__meta"></span>
+            </span>
+          </span>
+          <span class="skeleton skeleton-pick__fixture"></span>
+          <span class="skeleton skeleton-pick__form"></span>
+          <span class="skeleton skeleton-pick__score"></span>
+        </li>
+        <li class="pick skeleton-pick">
+          <span class="skeleton skeleton-pick__rank"></span>
+          <span class="skeleton-pick__main">
+            <span class="skeleton skeleton-pick__avatar"></span>
+            <span class="skeleton-pick__text">
+              <span class="skeleton skeleton-pick__name"></span>
+              <span class="skeleton skeleton-pick__meta"></span>
+            </span>
+          </span>
+          <span class="skeleton skeleton-pick__fixture"></span>
+          <span class="skeleton skeleton-pick__form"></span>
+          <span class="skeleton skeleton-pick__score"></span>
+        </li>
+        <li class="pick skeleton-pick">
+          <span class="skeleton skeleton-pick__rank"></span>
+          <span class="skeleton-pick__main">
+            <span class="skeleton skeleton-pick__avatar"></span>
+            <span class="skeleton-pick__text">
+              <span class="skeleton skeleton-pick__name"></span>
+              <span class="skeleton skeleton-pick__meta"></span>
+            </span>
+          </span>
+          <span class="skeleton skeleton-pick__fixture"></span>
+          <span class="skeleton skeleton-pick__form"></span>
+          <span class="skeleton skeleton-pick__score"></span>
+        </li>
+        <li class="pick skeleton-pick">
+          <span class="skeleton skeleton-pick__rank"></span>
+          <span class="skeleton-pick__main">
+            <span class="skeleton skeleton-pick__avatar"></span>
+            <span class="skeleton-pick__text">
+              <span class="skeleton skeleton-pick__name"></span>
+              <span class="skeleton skeleton-pick__meta"></span>
+            </span>
+          </span>
+          <span class="skeleton skeleton-pick__fixture"></span>
+          <span class="skeleton skeleton-pick__form"></span>
+          <span class="skeleton skeleton-pick__score"></span>
+        </li>
+        <li class="pick skeleton-pick">
+          <span class="skeleton skeleton-pick__rank"></span>
+          <span class="skeleton-pick__main">
+            <span class="skeleton skeleton-pick__avatar"></span>
+            <span class="skeleton-pick__text">
+              <span class="skeleton skeleton-pick__name"></span>
+              <span class="skeleton skeleton-pick__meta"></span>
+            </span>
+          </span>
+          <span class="skeleton skeleton-pick__fixture"></span>
+          <span class="skeleton skeleton-pick__form"></span>
+          <span class="skeleton skeleton-pick__score"></span>
+        </li>
+      </ol>
     </section>
 
     <section class="trending" id="trending"></section>
@@ -46,10 +125,18 @@
     <section class="explainer">
       <h2>How this is scored</h2>
       <p>
-        Every player gets one score built from three things: recent form,
-        how easy their next fixture is, and a small bump for playing at
-        home. No black box — the number next to each name on the right
-        is that total, high to low.
+        Every player gets one score built from three things: underlying
+        quality, how easy their next fixture is, and a small bump for
+        playing at home. No black box — the number next to each name on
+        the right is that total, high to low.
+      </p>
+      <p>
+        "Underlying quality" blends recent form with season-long
+        points-per-game, so one huge or awful match doesn't swing a
+        player's number too far, plus real chance quality — expected
+        goal involvements (xG + xA) for attackers, expected goals
+        conceded for defenders — so a player's actual goal threat or
+        clean-sheet odds count for more than a small run of results.
       </p>
       <p>
         Players who are injured, suspended, or barely playing are left
