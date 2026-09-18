@@ -22,6 +22,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, "public")));
+app.use(express.json());
 
 const FPL_BASE = "https://fantasy.premierleague.com/api";
 
@@ -685,6 +686,21 @@ function scoreToGrade(score) {
   return "F";
 }
 
+// Shared between the Team-ID and manual-squad Rate My Team paths: a player
+// is "flagged" if they show up in this gameweek's avoidThisWeek or
+// outOfForm sections, with the specific reason(s) why.
+function makeFlagReasonFor(data) {
+  const outOfFormIds = new Set(data.outOfForm.map((p) => p.id));
+  const avoidReasonById = new Map(data.avoidThisWeek.map((p) => [p.id, p.reason]));
+
+  return function flagReasonFor(id) {
+    const parts = [];
+    if (avoidReasonById.has(id)) parts.push(avoidReasonById.get(id));
+    if (outOfFormIds.has(id)) parts.push("Out of form");
+    return parts.join(" · ") || null;
+  };
+}
+
 app.get("/api/rate-team/:teamId", async (req, res) => {
   const teamId = Number(req.params.teamId);
   if (!Number.isInteger(teamId) || teamId <= 0) {
@@ -720,15 +736,7 @@ app.get("/api/rate-team/:teamId", async (req, res) => {
       return res.status(502).json({ error: "Could not reach the FPL API right now. Try again shortly." });
     }
 
-    const outOfFormIds = new Set(data.outOfForm.map((p) => p.id));
-    const avoidReasonById = new Map(data.avoidThisWeek.map((p) => [p.id, p.reason]));
-
-    function flagReasonFor(id) {
-      const parts = [];
-      if (avoidReasonById.has(id)) parts.push(avoidReasonById.get(id));
-      if (outOfFormIds.has(id)) parts.push("Out of form");
-      return parts.join(" · ") || null;
-    }
+    const flagReasonFor = makeFlagReasonFor(data);
 
     const recordsById = data._recordsById;
     const squad = (picksPayload.picks || [])
@@ -810,6 +818,52 @@ app.get("/api/rate-team/:teamId", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Could not rate this team right now. Try again shortly." });
+  }
+});
+
+// Manual-squad path: same grading as /api/rate-team, but for a squad built
+// by hand via player search rather than pulled from a real FPL team. There's
+// no captain and no bench/starter split for a hand-picked list of 15, so
+// those two checks are intentionally skipped — this just grades the 15
+// players' combined strength and flags any that are risky/out of form.
+app.post("/api/rate-squad", async (req, res) => {
+  const playerIds = Array.isArray(req.body?.playerIds) ? req.body.playerIds.map(Number) : null;
+
+  if (!playerIds || playerIds.length !== 15 || playerIds.some((id) => !Number.isInteger(id) || id <= 0)) {
+    return res.status(400).json({ error: "Provide exactly 15 valid player IDs." });
+  }
+  if (new Set(playerIds).size !== 15) {
+    return res.status(400).json({ error: "Each player can only be picked once." });
+  }
+
+  try {
+    const data = await getCaptainPicks();
+    const recordsById = data._recordsById;
+
+    const squad = playerIds.map((id) => recordsById[id]).filter(Boolean);
+    if (squad.length !== 15) {
+      return res.status(400).json({ error: "One or more player IDs weren't recognized." });
+    }
+
+    const flagReasonFor = makeFlagReasonFor(data);
+    const squadWithFlags = squad.map((p) => ({ ...p, flagReason: flagReasonFor(p.id) }));
+
+    const overallScore = squadWithFlags.reduce((sum, p) => sum + p.score, 0) / squadWithFlags.length;
+    const grade = scoreToGrade(overallScore);
+    const flaggedPlayers = squadWithFlags.filter((p) => p.flagReason);
+
+    res.json({
+      gameweek: data.gameweek,
+      overallScore: Math.round(overallScore * 10) / 10,
+      grade,
+      squad: squadWithFlags,
+      captainCallout: null,
+      flaggedPlayers,
+      benchSuggestions: [],
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not rate this squad right now. Try again shortly." });
   }
 });
 

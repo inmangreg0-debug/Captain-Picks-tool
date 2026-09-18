@@ -152,6 +152,11 @@
     </div>
 
     <div class="view" id="view-rate-team" role="tabpanel" aria-labelledby="tab-btn-rate-team" hidden>
+      <div class="rate-team-mode" role="group" aria-label="Rate My Team mode">
+        <button type="button" class="mode-btn is-active" id="mode-btn-team-id" aria-pressed="true">Enter Team ID</button>
+        <button type="button" class="mode-btn" id="mode-btn-build" aria-pressed="false">Build my squad</button>
+      </div>
+
       <form class="rate-team-form" id="rate-team-form">
         <label class="rate-team-form__label" for="rate-team-input">FPL Team ID</label>
         <div class="rate-team-form__row">
@@ -171,6 +176,26 @@
           fantasy.premierleague.com/entry/<strong>[your ID]</strong>/event/…
         </p>
       </form>
+
+      <div class="squad-builder" id="squad-builder" hidden>
+        <label class="rate-team-form__label" for="squad-builder-search">Search players to add</label>
+        <div class="player-search" id="squad-builder-search-wrap">
+          <input
+            type="search"
+            id="squad-builder-search"
+            class="player-search__input"
+            placeholder="Search any player…"
+            autocomplete="off"
+            aria-label="Search players to add to your squad"
+          />
+          <ul class="player-search__results" id="squad-builder-search-results" hidden></ul>
+        </div>
+
+        <p class="squad-builder__count" id="squad-builder-count">0/15 selected</p>
+        <ul class="squad-builder__list" id="squad-builder-list"></ul>
+
+        <button type="button" class="rate-team-form__submit" id="squad-builder-submit" hidden>Rate my team</button>
+      </div>
 
       <section class="rate-team-result" id="rate-team-result" aria-live="polite"></section>
     </div>

@@ -583,27 +583,28 @@ async function loadCaptainPicks() {
   }
 }
 
-function initPlayerSearch() {
-  const container = document.getElementById("player-search");
-  const input = document.getElementById("player-search-input");
-  const resultsList = document.getElementById("player-search-results");
-  if (!container || !input || !resultsList) return;
-
+// Debounced player-search dropdown, shared by the masthead search (which
+// opens the player modal) and the squad builder (which adds to a running
+// pick list) — same fetch/debounce/render behavior, different `onSelect`.
+function initPlayerSearchDropdown({ containerEl, inputEl, resultsEl, onSelect }) {
   let debounceTimer = null;
   let requestId = 0;
+  let currentResults = [];
 
   function clearResults() {
-    resultsList.innerHTML = "";
-    resultsList.hidden = true;
+    resultsEl.innerHTML = "";
+    resultsEl.hidden = true;
+    currentResults = [];
   }
 
   function renderResults(results) {
+    currentResults = results;
     if (!results.length) {
       clearResults();
       return;
     }
 
-    resultsList.innerHTML = results
+    resultsEl.innerHTML = results
       .map(
         (r) => `
           <li class="player-search__result">
@@ -618,11 +619,11 @@ function initPlayerSearch() {
         `
       )
       .join("");
-    resultsList.hidden = false;
+    resultsEl.hidden = false;
   }
 
-  input.addEventListener("input", () => {
-    const query = input.value.trim();
+  inputEl.addEventListener("input", () => {
+    const query = inputEl.value.trim();
     clearTimeout(debounceTimer);
 
     if (!query) {
@@ -645,16 +646,33 @@ function initPlayerSearch() {
     }, 300);
   });
 
-  resultsList.addEventListener("click", (e) => {
+  resultsEl.addEventListener("click", (e) => {
     const button = e.target.closest(".player-search__result-btn[data-player-id]");
     if (!button) return;
-    openPlayerModal(button.dataset.playerId);
+    const player = currentResults.find((r) => String(r.id) === button.dataset.playerId);
     clearResults();
-    input.value = "";
+    if (player) onSelect(player);
   });
 
   document.addEventListener("click", (e) => {
-    if (!container.contains(e.target)) clearResults();
+    if (!containerEl.contains(e.target)) clearResults();
+  });
+}
+
+function initPlayerSearch() {
+  const container = document.getElementById("player-search");
+  const input = document.getElementById("player-search-input");
+  const resultsList = document.getElementById("player-search-results");
+  if (!container || !input || !resultsList) return;
+
+  initPlayerSearchDropdown({
+    containerEl: container,
+    inputEl: input,
+    resultsEl: resultsList,
+    onSelect: (player) => {
+      openPlayerModal(player.id);
+      input.value = "";
+    },
   });
 }
 
@@ -886,9 +904,124 @@ function initRateTeam() {
   });
 }
 
+// --- Rate My Team: mode toggle (Team ID vs. manual squad builder) ---------
+
+function initRateTeamModeToggle() {
+  const modes = [
+    { btn: "mode-btn-team-id", el: "rate-team-form" },
+    { btn: "mode-btn-build", el: "squad-builder" },
+  ];
+  const result = document.getElementById("rate-team-result");
+
+  modes.forEach(({ btn }) => {
+    const button = document.getElementById(btn);
+    if (!button) return;
+    button.addEventListener("click", () => {
+      modes.forEach(({ btn: otherBtn, el: otherElId }) => {
+        const otherButton = document.getElementById(otherBtn);
+        const otherEl = document.getElementById(otherElId);
+        const isActive = otherBtn === btn;
+        if (otherButton) {
+          otherButton.classList.toggle("is-active", isActive);
+          otherButton.setAttribute("aria-pressed", String(isActive));
+        }
+        if (otherEl) otherEl.hidden = !isActive;
+      });
+      if (result) result.innerHTML = "";
+    });
+  });
+}
+
+// --- Rate My Team: manual squad builder -----------------------------------
+
+let squadBuilderPicks = [];
+
+function renderSquadBuilderList() {
+  const list = document.getElementById("squad-builder-list");
+  const count = document.getElementById("squad-builder-count");
+  const submit = document.getElementById("squad-builder-submit");
+  if (!list || !count || !submit) return;
+
+  count.textContent = `${squadBuilderPicks.length}/15 selected`;
+
+  list.innerHTML = squadBuilderPicks
+    .map(
+      (p) => `
+        <li class="squad-builder__item">
+          ${playerPhotoMarkup(p)}
+          <span class="squad-builder__text">
+            <span class="squad-builder__name">${p.name}</span>
+            <span class="squad-builder__meta">${p.position} · ${p.team}</span>
+          </span>
+          <button type="button" class="squad-builder__remove" data-player-id="${p.id}" aria-label="Remove ${p.name}">&times;</button>
+        </li>
+      `
+    )
+    .join("");
+
+  submit.hidden = squadBuilderPicks.length !== 15;
+}
+
+function initSquadBuilder() {
+  const searchWrap = document.getElementById("squad-builder-search-wrap");
+  const input = document.getElementById("squad-builder-search");
+  const resultsList = document.getElementById("squad-builder-search-results");
+  const list = document.getElementById("squad-builder-list");
+  const submit = document.getElementById("squad-builder-submit");
+  const result = document.getElementById("rate-team-result");
+  if (!searchWrap || !input || !resultsList || !list || !submit || !result) return;
+
+  initPlayerSearchDropdown({
+    containerEl: searchWrap,
+    inputEl: input,
+    resultsEl: resultsList,
+    onSelect: (player) => {
+      if (squadBuilderPicks.length >= 15) return;
+      if (squadBuilderPicks.some((p) => String(p.id) === String(player.id))) return;
+      squadBuilderPicks.push(player);
+      renderSquadBuilderList();
+      input.value = "";
+    },
+  });
+
+  list.addEventListener("click", (e) => {
+    const button = e.target.closest(".squad-builder__remove[data-player-id]");
+    if (!button) return;
+    squadBuilderPicks = squadBuilderPicks.filter((p) => String(p.id) !== button.dataset.playerId);
+    renderSquadBuilderList();
+  });
+
+  submit.addEventListener("click", () => {
+    if (squadBuilderPicks.length !== 15) return;
+
+    result.innerHTML = '<p class="board__loading">Rating your team…</p>';
+    submit.disabled = true;
+
+    fetch("/api/rate-squad", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ playerIds: squadBuilderPicks.map((p) => Number(p.id)) }),
+    })
+      .then((res) =>
+        res.ok ? res.json() : res.json().then((body) => Promise.reject(new Error(body.error || "Request failed")))
+      )
+      .then((data) => {
+        renderRateTeamResult(data);
+      })
+      .catch((err) => {
+        result.innerHTML = `<p class="board__error">${err.message || "Could not rate this squad right now."}</p>`;
+      })
+      .finally(() => {
+        submit.disabled = false;
+      });
+  });
+}
+
 initPlayerModal();
 initPlayerSearch();
 initPullToRefresh();
 initTabs();
 initRateTeam();
+initRateTeamModeToggle();
+initSquadBuilder();
 loadCaptainPicks();

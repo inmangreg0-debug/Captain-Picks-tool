@@ -1181,6 +1181,89 @@ body.modal-open {
   gap: 0.4rem;
 }
 
+.rate-team-mode {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 1.25rem;
+}
+
+.mode-btn {
+  min-height: 36px;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--pitch-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--sage);
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mode-btn.is-active {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(216, 168, 67, 0.1);
+}
+
+.mode-btn:active {
+  transform: none;
+}
+
+.squad-builder__count {
+  color: var(--sage);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0.9rem 0 0.5rem;
+}
+
+.squad-builder__list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  border-top: 1px solid var(--pitch-line);
+}
+
+.squad-builder__item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--pitch-line);
+}
+
+.squad-builder__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.squad-builder__name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.squad-builder__meta {
+  font-size: 0.78rem;
+  color: var(--sage);
+}
+
+.squad-builder__remove {
+  min-height: 32px;
+  min-width: 32px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(192, 96, 77, 0.12);
+  color: var(--hard);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
 @media (max-width: 480px) {
   .tabs {
     padding: 0 1.25rem;
