@@ -407,6 +407,65 @@ function generateReport(player, projectedPoints) {
     .join(" ");
 }
 
+// Builds the one scored player record shared by every section of the app
+// (picks, differentials, avoid, out-of-form, trending, and Rate My Team) —
+// used to be duplicated near-verbatim in four places, which is exactly how
+// the GKP cap fix above only landed in one of them. `ctx` carries the
+// per-gameweek lookups computed once in getCaptainPicks (fixtures, teams,
+// season goal/conceded totals, benchmarks).
+function buildPlayerRecord(p, ctx) {
+  const { teamFixture, teamsById, teamGoalsById, teamConcededById, benchmarks, gamesPlayed } = ctx;
+
+  const fixture = teamFixture[p.team];
+  const position = POSITION_NAMES[p.element_type] || "";
+  const form = parseFloat(p.form) || 0;
+  const quality = qualityScore(p, position);
+  const formStatus = getFormStatus(p);
+  const fixtureScore = fixture ? 6 - fixture.difficulty : 3; // difficulty 1 (easy) -> 5, 5 (hard) -> 1
+  const homeBonus = fixture && fixture.isHome ? 0.5 : 0;
+  const score = Math.round((quality + fixtureScore * FIXTURE_WEIGHT + homeBonus) * 10) / 10;
+
+  const team = teamsById[p.team];
+  const opponent = fixture ? teamsById[fixture.opponentId] : null;
+  const difficulty = fixture ? fixture.difficulty : 3;
+  const isHome = fixture ? fixture.isHome : false;
+  const { positiveStat, negativeStat } = getPlayerFacts(p, position, teamGoalsById, benchmarks, gamesPlayed);
+  const projectedPoints = projectPoints({ position, quality }, difficulty, isHome);
+
+  const player = {
+    id: p.id,
+    name: `${p.first_name} ${p.second_name}`,
+    team: team ? team.name : "Unknown",
+    position,
+    opponent: opponent ? opponent.short_name : "???",
+    isHome,
+    difficulty,
+    form,
+    price: (p.now_cost / 10).toFixed(1),
+    ownership: p.selected_by_percent,
+    score,
+    photoCode: playerPhotoCode(p),
+    teamBadge: teamBadgeUrl(team),
+    positiveStat,
+    negativeStat,
+    formStatus,
+    trendingDown: formStatus === "bad",
+    trendingUp: formStatus === "good",
+    projectedPoints,
+    starts: p.starts || 0,
+    cleanSheets: p.clean_sheets || 0,
+    goalsConceded: p.goals_conceded || 0,
+    goalsScored: p.goals_scored || 0,
+    assists: p.assists || 0,
+    saves: p.saves || 0,
+    bonus: p.bonus || 0,
+    opponentGoalsPerGame: fixture ? (teamGoalsById[fixture.opponentId] || 0) / gamesPlayed : null,
+    opponentConcededPerGame: fixture ? (teamConcededById[fixture.opponentId] || 0) / gamesPlayed : null,
+  };
+  player.report = generateReport(player, projectedPoints);
+  return player;
+}
+
 async function getCaptainPicks() {
   if (cache.data && Date.now() < cache.expires) {
     return cache.data;
@@ -459,6 +518,16 @@ async function getCaptainPicks() {
   const benchmarks = computeBenchmarks(bootstrap);
   const gamesPlayed = getGamesPlayed(bootstrap);
 
+  const recordCtx = { teamFixture, teamsById, teamGoalsById, teamConcededById, benchmarks, gamesPlayed };
+
+  // Every player gets a record, not just the ones eligible for the picks
+  // sections below — Rate My Team needs to look up *any* squad player
+  // (including ones benched for low minutes or injury) by id.
+  const recordsById = {};
+  bootstrap.elements.forEach((p) => {
+    recordsById[p.id] = buildPlayerRecord(p, recordCtx);
+  });
+
   const scoredPlayers = bootstrap.elements
     .filter((p) => p.status === "a") // "a" = available (not injured/suspended/on loan out)
     .filter((p) => p.minutes >= 180) // has actually been playing regularly
@@ -467,64 +536,8 @@ async function getCaptainPicks() {
         p.chance_of_playing_next_round === null ||
         p.chance_of_playing_next_round >= 75
     )
-    .map((p) => {
-      const fixture = teamFixture[p.team];
-      if (!fixture) return null;
-
-      const position = POSITION_NAMES[p.element_type] || "";
-      const form = parseFloat(p.form) || 0;
-      const quality = qualityScore(p, position);
-      const formStatus = getFormStatus(p);
-      const fixtureScore = 6 - fixture.difficulty; // difficulty 1 (easy) -> 5, 5 (hard) -> 1
-      const homeBonus = fixture.isHome ? 0.5 : 0;
-      const score =
-        Math.round((quality + fixtureScore * FIXTURE_WEIGHT + homeBonus) * 10) / 10;
-
-      const team = teamsById[p.team];
-      const opponent = teamsById[fixture.opponentId];
-      const { positiveStat, negativeStat } = getPlayerFacts(
-        p,
-        position,
-        teamGoalsById,
-        benchmarks,
-        gamesPlayed
-      );
-      const projectedPoints = projectPoints({ position, quality }, fixture.difficulty, fixture.isHome);
-
-      const player = {
-        id: p.id,
-        name: `${p.first_name} ${p.second_name}`,
-        team: team ? team.name : "Unknown",
-        position,
-        opponent: opponent ? opponent.short_name : "???",
-        isHome: fixture.isHome,
-        difficulty: fixture.difficulty,
-        form,
-        price: (p.now_cost / 10).toFixed(1),
-        ownership: p.selected_by_percent,
-        score,
-        photoCode: playerPhotoCode(p),
-        teamBadge: teamBadgeUrl(team),
-        positiveStat,
-        negativeStat,
-        formStatus,
-        trendingDown: formStatus === "bad",
-        trendingUp: formStatus === "good",
-        projectedPoints,
-        starts: p.starts || 0,
-        cleanSheets: p.clean_sheets || 0,
-        goalsConceded: p.goals_conceded || 0,
-        goalsScored: p.goals_scored || 0,
-        assists: p.assists || 0,
-        saves: p.saves || 0,
-        bonus: p.bonus || 0,
-        opponentGoalsPerGame: (teamGoalsById[fixture.opponentId] || 0) / gamesPlayed,
-        opponentConcededPerGame: (teamConcededById[fixture.opponentId] || 0) / gamesPlayed,
-      };
-      player.report = generateReport(player, projectedPoints);
-      return player;
-    })
-    .filter(Boolean);
+    .filter((p) => teamFixture[p.team]) // has a fixture this gameweek
+    .map((p) => recordsById[p.id]);
 
   // Top 15 per position, merged, rather than a single top-15-overall cut —
   // keeps every position fully represented so the position filter chips on
@@ -537,19 +550,25 @@ async function getCaptainPicks() {
       .slice(0, 15)
   );
 
-  const DIFFERENTIALS_GKP_CAP = 2; // squads only carry 1-2 keepers — don't let GKP crowd out DEF/MID/FWD
+  // Squads only ever carry 1-2 keepers, so no GKP-driven section should ever
+  // surface more than 2 — INTENTIONAL, applied per-position (not a global
+  // cut) so it can't silently regress the way it did before: outOfForm was
+  // once fixed for DEF/MID/FWD depth without carrying this same cap over,
+  // letting backup/rotation keepers with a single bad game flood that list.
+  // Do not remove without re-checking both `differentials` and `outOfForm`.
+  const GKP_CAP = 2;
 
   // Low-ownership players from the same pool who are still scoring well —
   // a chance to gain ground on the rest of your mini-league. Built from
   // scoredPlayers, so it already inherits that pool's minutes >= 180 filter.
   // Same per-position depth treatment as `picks` above, except goalkeepers
-  // are capped at 2 (a realistic squad need) so the section isn't just a
-  // wall of similarly-scored keepers.
+  // are capped (see GKP_CAP above) so the section isn't just a wall of
+  // similarly-scored keepers.
   const differentials = POSITION_ORDER.flatMap((pos) =>
     scoredPlayers
       .filter((p) => p.position === pos && parseFloat(p.ownership) < OWNERSHIP_DIFFERENTIAL_MAX)
       .sort((a, b) => b.score - a.score)
-      .slice(0, pos === "GKP" ? DIFFERENTIALS_GKP_CAP : 15)
+      .slice(0, pos === "GKP" ? GKP_CAP : 15)
   );
 
   // Widely-owned players worth a second thought. This pool intentionally
@@ -557,21 +576,9 @@ async function getCaptainPicks() {
   // doubts are exactly what we want to flag here.
   const avoidCandidates = bootstrap.elements
     .filter((p) => parseFloat(p.selected_by_percent) > OWNERSHIP_AVOID_MIN)
+    .filter((p) => teamFixture[p.team])
     .map((p) => {
-      const fixture = teamFixture[p.team];
-      if (!fixture) return null;
-
-      const position = POSITION_NAMES[p.element_type] || "";
-      const form = parseFloat(p.form) || 0;
-      const quality = qualityScore(p, position);
-      const formStatus = getFormStatus(p);
-      const fixtureScore = 6 - fixture.difficulty;
-      const homeBonus = fixture.isHome ? 0.5 : 0;
-      const score =
-        Math.round((quality + fixtureScore * FIXTURE_WEIGHT + homeBonus) * 10) / 10;
-
-      const team = teamsById[p.team];
-      const opponent = teamsById[fixture.opponentId];
+      const record = recordsById[p.id];
       const flagged =
         p.chance_of_playing_next_round !== null &&
         p.chance_of_playing_next_round < 75;
@@ -579,57 +586,14 @@ async function getCaptainPicks() {
       let reason;
       if (flagged) {
         reason = "Rotation risk";
-      } else if (fixture.difficulty >= 4) {
+      } else if (record.difficulty >= 4) {
         reason = "Tough fixture";
       } else {
         reason = "Poor form";
       }
 
-      const { positiveStat, negativeStat } = getPlayerFacts(
-        p,
-        position,
-        teamGoalsById,
-        benchmarks,
-        gamesPlayed
-      );
-      const projectedPoints = projectPoints({ position, quality }, fixture.difficulty, fixture.isHome);
-
-      const player = {
-        id: p.id,
-        name: `${p.first_name} ${p.second_name}`,
-        team: team ? team.name : "Unknown",
-        position,
-        opponent: opponent ? opponent.short_name : "???",
-        isHome: fixture.isHome,
-        difficulty: fixture.difficulty,
-        form,
-        price: (p.now_cost / 10).toFixed(1),
-        ownership: p.selected_by_percent,
-        score,
-        reason,
-        flagged,
-        photoCode: playerPhotoCode(p),
-        teamBadge: teamBadgeUrl(team),
-        positiveStat,
-        negativeStat,
-        formStatus,
-        trendingDown: formStatus === "bad",
-        trendingUp: formStatus === "good",
-        projectedPoints,
-        starts: p.starts || 0,
-        cleanSheets: p.clean_sheets || 0,
-        goalsConceded: p.goals_conceded || 0,
-        goalsScored: p.goals_scored || 0,
-        assists: p.assists || 0,
-        saves: p.saves || 0,
-        bonus: p.bonus || 0,
-        opponentGoalsPerGame: (teamGoalsById[fixture.opponentId] || 0) / gamesPlayed,
-        opponentConcededPerGame: (teamConcededById[fixture.opponentId] || 0) / gamesPlayed,
-      };
-      player.report = generateReport(player, projectedPoints);
-      return player;
-    })
-    .filter(Boolean);
+      return { ...record, reason, flagged };
+    });
 
   const avoidThisWeek = avoidCandidates
     .sort((a, b) => {
@@ -648,71 +612,24 @@ async function getCaptainPicks() {
   // scoredPlayers, and form are) — requiring >=10% ownership on top of "bad"
   // form very nearly empties this section, since players who are genuinely
   // out of form are exactly the ones managers have already transferred out.
+  // Goalkeepers are capped (see GKP_CAP above, INTENTIONAL): there are far
+  // fewer eligible GKPs than outfield players, so a much larger fraction of
+  // the GKP pool ends up with "bad" form (backup/rotation keepers who
+  // conceded heavily in their few appearances), which would otherwise flood
+  // this list with keepers even though a squad only ever needs 1-2.
   const outOfForm = POSITION_ORDER.flatMap((pos) =>
     scoredPlayers
       .filter((p) => p.position === pos && p.formStatus === "bad")
       .sort((a, b) => a.form - b.form)
-      .slice(0, 15)
+      .slice(0, pos === "GKP" ? GKP_CAP : 15)
   );
 
   // Net transfers this gameweek, used to surface players the crowd is
   // moving in and out of ahead of the deadline.
-  const transferMovers = bootstrap.elements.map((p) => {
-    const team = teamsById[p.team];
-    const position = POSITION_NAMES[p.element_type] || "";
-    const fixture = teamFixture[p.team];
-    const form = parseFloat(p.form) || 0;
-    const quality = qualityScore(p, position);
-    const formStatus = getFormStatus(p);
-    const opponentTeam = fixture ? teamsById[fixture.opponentId] : null;
-    const isHome = fixture ? fixture.isHome : false;
-    const difficulty = fixture ? fixture.difficulty : 3;
-    const opponent = opponentTeam ? opponentTeam.short_name : "???";
-    const opponentGoalsPerGame = fixture ? (teamGoalsById[fixture.opponentId] || 0) / gamesPlayed : null;
-    const opponentConcededPerGame = fixture
-      ? (teamConcededById[fixture.opponentId] || 0) / gamesPlayed
-      : null;
-    const { positiveStat, negativeStat } = getPlayerFacts(
-      p,
-      position,
-      teamGoalsById,
-      benchmarks,
-      gamesPlayed
-    );
-    const projectedPoints = projectPoints({ position, quality }, difficulty, isHome);
-
-    const player = {
-      id: p.id,
-      name: `${p.first_name} ${p.second_name}`,
-      team: team ? team.name : "Unknown",
-      position,
-      price: (p.now_cost / 10).toFixed(1),
-      netTransfers: p.transfers_in_event - p.transfers_out_event,
-      photoCode: playerPhotoCode(p),
-      teamBadge: teamBadgeUrl(team),
-      form,
-      opponent,
-      isHome,
-      difficulty,
-      positiveStat,
-      negativeStat,
-      formStatus,
-      trendingDown: formStatus === "bad",
-      trendingUp: formStatus === "good",
-      projectedPoints,
-      starts: p.starts || 0,
-      cleanSheets: p.clean_sheets || 0,
-      goalsConceded: p.goals_conceded || 0,
-      goalsScored: p.goals_scored || 0,
-      assists: p.assists || 0,
-      saves: p.saves || 0,
-      bonus: p.bonus || 0,
-      opponentGoalsPerGame,
-      opponentConcededPerGame,
-    };
-    player.report = generateReport(player, projectedPoints);
-    return player;
-  });
+  const transferMovers = bootstrap.elements.map((p) => ({
+    ...recordsById[p.id],
+    netTransfers: p.transfers_in_event - p.transfers_out_event,
+  }));
 
   const trendingUp = [...transferMovers]
     .sort((a, b) => b.netTransfers - a.netTransfers)
@@ -724,6 +641,7 @@ async function getCaptainPicks() {
 
   const result = {
     gameweek: nextEvent.name,
+    eventId: nextEvent.id,
     deadline: nextEvent.deadline_time,
     picks,
     differentials,
@@ -731,6 +649,10 @@ async function getCaptainPicks() {
     outOfForm,
     trendingUp,
     trendingDown,
+    // Internal only — every player's record keyed by id, so Rate My Team
+    // can look up arbitrary squad players without recomputing scores.
+    // Stripped out before this gets sent as the /api/captain-picks response.
+    _recordsById: recordsById,
   };
 
   cache = { data: result, expires: Date.now() + CACHE_MS };
@@ -739,13 +661,155 @@ async function getCaptainPicks() {
 
 app.get("/api/captain-picks", async (req, res) => {
   try {
-    const picks = await getCaptainPicks();
+    const { _recordsById, ...picks } = await getCaptainPicks();
     res.json(picks);
   } catch (err) {
     console.error(err);
     res.status(500).json({
       error: "Could not load captain picks right now. Try again shortly.",
     });
+  }
+});
+
+// --- Rate My Team ------------------------------------------------------
+
+// Score -> letter grade. Thresholds are calibrated against the observed
+// range of real player scores (roughly 0-16 this season: weak bench
+// fodder near the bottom, elite in-form players with kind fixtures near
+// the top) — retune here if the underlying score formula changes shape.
+function scoreToGrade(score) {
+  if (score >= 12) return "A";
+  if (score >= 9.5) return "B";
+  if (score >= 7) return "C";
+  if (score >= 4.5) return "D";
+  return "F";
+}
+
+app.get("/api/rate-team/:teamId", async (req, res) => {
+  const teamId = Number(req.params.teamId);
+  if (!Number.isInteger(teamId) || teamId <= 0) {
+    return res.status(400).json({ error: "Enter a valid numeric Team ID." });
+  }
+
+  try {
+    const data = await getCaptainPicks();
+    const bootstrap = await getBootstrap();
+    const currentEvent =
+      bootstrap.events.find((e) => e.is_current) ||
+      bootstrap.events.find((e) => e.is_next) ||
+      bootstrap.events.slice().reverse().find((e) => e.finished);
+
+    if (!currentEvent) {
+      return res.status(500).json({ error: "Could not determine the current gameweek." });
+    }
+
+    const picksUrl = `${FPL_BASE}/entry/${teamId}/event/${currentEvent.id}/picks/`;
+    let picksPayload;
+    try {
+      const picksRes = await fetch(picksUrl);
+      // A bad/nonexistent Team ID doesn't reliably come back as 404 from
+      // FPL (large/malformed ids have also been seen returning 503) — any
+      // non-OK response for a request we built correctly means the ID is
+      // the problem, not our request or their uptime.
+      if (!picksRes.ok) {
+        return res.status(404).json({ error: "Team not found. Double-check the Team ID and try again." });
+      }
+      picksPayload = await picksRes.json();
+    } catch (err) {
+      console.error(err);
+      return res.status(502).json({ error: "Could not reach the FPL API right now. Try again shortly." });
+    }
+
+    const outOfFormIds = new Set(data.outOfForm.map((p) => p.id));
+    const avoidReasonById = new Map(data.avoidThisWeek.map((p) => [p.id, p.reason]));
+
+    function flagReasonFor(id) {
+      const parts = [];
+      if (avoidReasonById.has(id)) parts.push(avoidReasonById.get(id));
+      if (outOfFormIds.has(id)) parts.push("Out of form");
+      return parts.join(" · ") || null;
+    }
+
+    const recordsById = data._recordsById;
+    const squad = (picksPayload.picks || [])
+      .map((pick) => {
+        const record = recordsById[pick.element];
+        if (!record) return null;
+        return {
+          ...record,
+          isCaptain: pick.is_captain,
+          isViceCaptain: pick.is_vice_captain,
+          isBench: pick.position > 11,
+          squadPosition: pick.position,
+          flagReason: flagReasonFor(record.id),
+        };
+      })
+      .filter(Boolean);
+
+    if (squad.length === 0) {
+      return res.status(404).json({ error: "Could not load this team's squad. Double-check the Team ID and try again." });
+    }
+
+    const overallScore = squad.reduce((sum, p) => sum + p.score, 0) / squad.length;
+    const grade = scoreToGrade(overallScore);
+
+    // "Top captain picks" = the highest-scoring players overall this
+    // gameweek, across every position (not just top-of-position), since a
+    // captain choice competes against every other player, not just peers.
+    const topCaptainIds = new Set(
+      [...data.picks].sort((a, b) => b.score - a.score).slice(0, 5).map((p) => p.id)
+    );
+
+    const captainPlayer = squad.find((p) => p.isCaptain) || null;
+    let captainCallout = null;
+    if (captainPlayer) {
+      if (captainPlayer.flagReason) {
+        captainCallout = {
+          player: captainPlayer,
+          verdict: "poor",
+          message: `${captainPlayer.name} is flagged this week (${captainPlayer.flagReason}) — the armband might be better elsewhere.`,
+        };
+      } else if (topCaptainIds.has(captainPlayer.id)) {
+        captainCallout = {
+          player: captainPlayer,
+          verdict: "good",
+          message: `${captainPlayer.name} is one of this week's top-rated players — a solid captain choice.`,
+        };
+      } else {
+        captainCallout = {
+          player: captainPlayer,
+          verdict: "neutral",
+          message: `${captainPlayer.name} isn't among this week's top-rated picks, but there's no major red flag either.`,
+        };
+      }
+    }
+
+    const flaggedPlayers = squad.filter((p) => p.flagReason);
+
+    const starters = squad.filter((p) => !p.isBench);
+    const bench = squad.filter((p) => p.isBench);
+    const benchSuggestions = bench
+      .map((benchPlayer) => {
+        const worseStarter = starters
+          .filter((s) => s.position === benchPlayer.position && s.projectedPoints < benchPlayer.projectedPoints)
+          .sort((a, b) => a.projectedPoints - b.projectedPoints)[0];
+        return worseStarter ? { bench: benchPlayer, starter: worseStarter } : null;
+      })
+      .filter(Boolean);
+
+    res.json({
+      teamId,
+      gameweek: currentEvent.name,
+      overallScore: Math.round(overallScore * 10) / 10,
+      grade,
+      squad,
+      captainCallout,
+      flaggedPlayers,
+      benchSuggestions,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not rate this team right now. Try again shortly." });
   }
 });
 

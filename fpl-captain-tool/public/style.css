@@ -969,3 +969,228 @@ body.modal-open {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* --- Tabs --- */
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  border-bottom: 1px solid var(--pitch-line);
+}
+
+.tab-btn {
+  min-height: 44px;
+  padding: 0.75rem 0.25rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--sage);
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  margin-right: 1.25rem;
+}
+
+.tab-btn.is-active {
+  color: var(--chalk);
+  border-bottom-color: var(--gold);
+}
+
+.tab-btn:active {
+  transform: none;
+}
+
+.view[hidden] {
+  display: none;
+}
+
+/* --- Rate My Team --- */
+
+.rate-team-form__label {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.rate-team-form__row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.rate-team-form__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.7rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--pitch-line);
+  background: var(--pitch-mid);
+  color: var(--chalk);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+}
+
+.rate-team-form__submit {
+  min-height: 44px;
+  padding: 0 1.1rem;
+  border: none;
+  border-radius: 8px;
+  background: var(--gold);
+  color: var(--pitch-dark);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rate-team-form__submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.rate-team-form__hint {
+  color: var(--sage);
+  font-size: 0.8rem;
+  margin: 0.6rem 0 0;
+  max-width: 60ch;
+}
+
+.rate-team-summary {
+  margin-top: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.grade-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--pitch-line);
+}
+
+.grade-card__letter {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 2.6rem;
+  line-height: 1;
+}
+
+.grade-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.grade-card__score {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.grade-card__gw {
+  color: var(--sage);
+  font-size: 0.82rem;
+}
+
+.grade-card--good {
+  border-color: var(--easy);
+  background: rgba(93, 169, 124, 0.1);
+}
+.grade-card--good .grade-card__letter {
+  color: var(--easy);
+}
+
+.grade-card--medium {
+  border-color: var(--medium);
+  background: rgba(201, 162, 39, 0.1);
+}
+.grade-card--medium .grade-card__letter {
+  color: var(--medium);
+}
+
+.grade-card--bad {
+  border-color: var(--hard);
+  background: rgba(192, 96, 77, 0.1);
+}
+.grade-card--bad .grade-card__letter {
+  color: var(--hard);
+}
+
+.callout {
+  padding: 0.9rem 1.1rem;
+  border-radius: 8px;
+  border: 1px solid var(--pitch-line);
+}
+
+.callout__heading {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin: 0 0 0.25rem;
+}
+
+.callout__message {
+  color: var(--sage);
+  font-size: 0.88rem;
+  margin: 0;
+}
+
+.callout--good {
+  border-color: var(--easy);
+  background: rgba(93, 169, 124, 0.08);
+}
+
+.callout--neutral {
+  border-color: var(--pitch-line);
+}
+
+.callout--poor {
+  border-color: var(--hard);
+  background: rgba(192, 96, 77, 0.08);
+}
+
+.bench-suggestions {
+  padding: 0.9rem 1.1rem;
+  border-radius: 8px;
+  border: 1px solid var(--medium);
+  background: rgba(201, 162, 39, 0.08);
+}
+
+.bench-suggestions__heading {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin: 0 0 0.5rem;
+}
+
+.bench-suggestions__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--sage);
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+@media (max-width: 480px) {
+  .tabs {
+    padding: 0 1.25rem;
+  }
+
+  .rate-team-form__row {
+    flex-direction: column;
+  }
+
+  .grade-card__letter {
+    font-size: 2.1rem;
+  }
+}

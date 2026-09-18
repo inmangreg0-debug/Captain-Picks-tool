@@ -13,12 +13,18 @@
   <header class="masthead">
     <div class="masthead__inner">
       <p class="masthead__gw" id="gameweek-label">Loading gameweek…</p>
-      <h1 class="masthead__title">Who to captain this week</h1>
+      <h1 class="masthead__title" id="page-title">Who to captain this week</h1>
       <p class="masthead__deadline" id="deadline-label"></p>
     </div>
   </header>
 
+  <nav class="tabs" role="tablist" aria-label="View">
+    <button type="button" class="tab-btn is-active" id="tab-btn-picks" role="tab" aria-selected="true" aria-controls="view-picks">Captain Picks</button>
+    <button type="button" class="tab-btn" id="tab-btn-rate-team" role="tab" aria-selected="false" aria-controls="view-rate-team">Rate My Team</button>
+  </nav>
+
   <main>
+    <div class="view" id="view-picks" role="tabpanel" aria-labelledby="tab-btn-picks">
     <section class="player-search" id="player-search">
       <input
         type="search"
@@ -143,6 +149,31 @@
         off the list entirely.
       </p>
     </section>
+    </div>
+
+    <div class="view" id="view-rate-team" role="tabpanel" aria-labelledby="tab-btn-rate-team" hidden>
+      <form class="rate-team-form" id="rate-team-form">
+        <label class="rate-team-form__label" for="rate-team-input">FPL Team ID</label>
+        <div class="rate-team-form__row">
+          <input
+            type="text"
+            inputmode="numeric"
+            id="rate-team-input"
+            class="rate-team-form__input"
+            placeholder="e.g. 1234567"
+            autocomplete="off"
+            aria-label="FPL Team ID"
+          />
+          <button type="submit" class="rate-team-form__submit" id="rate-team-submit">Rate my team</button>
+        </div>
+        <p class="rate-team-form__hint">
+          Find your Team ID in the URL when viewing your team on the FPL site —
+          fantasy.premierleague.com/entry/<strong>[your ID]</strong>/event/…
+        </p>
+      </form>
+
+      <section class="rate-team-result" id="rate-team-result" aria-live="polite"></section>
+    </div>
   </main>
 
   <footer class="site-footer">

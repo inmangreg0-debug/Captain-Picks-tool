@@ -729,7 +729,166 @@ function initPullToRefresh() {
   });
 }
 
+// --- Tabs ----------------------------------------------------------------
+
+function initTabs() {
+  const tabs = [
+    { btn: "tab-btn-picks", view: "view-picks", title: "Who to captain this week" },
+    { btn: "tab-btn-rate-team", view: "view-rate-team", title: "Rate your squad" },
+  ];
+  const pageTitle = document.getElementById("page-title");
+
+  tabs.forEach(({ btn, view }) => {
+    const button = document.getElementById(btn);
+    if (!button) return;
+    button.addEventListener("click", () => {
+      tabs.forEach(({ btn: otherBtn, view: otherView, title }) => {
+        const otherButton = document.getElementById(otherBtn);
+        const otherSection = document.getElementById(otherView);
+        const isActive = otherBtn === btn;
+        if (otherButton) {
+          otherButton.classList.toggle("is-active", isActive);
+          otherButton.setAttribute("aria-selected", String(isActive));
+        }
+        if (otherSection) otherSection.hidden = !isActive;
+        if (isActive && pageTitle) pageTitle.textContent = title;
+      });
+    });
+  });
+}
+
+// --- Rate My Team ----------------------------------------------------------
+
+function renderGradeCard(grade, overallScore, gameweek) {
+  const gradeClass = ["A", "B"].includes(grade)
+    ? "good"
+    : grade === "C"
+    ? "medium"
+    : "bad";
+
+  return `
+    <div class="grade-card grade-card--${gradeClass}">
+      <span class="grade-card__letter">${grade}</span>
+      <span class="grade-card__meta">
+        <span class="grade-card__score">Squad score: ${overallScore.toFixed(1)}</span>
+        <span class="grade-card__gw">${gameweek}</span>
+      </span>
+    </div>
+  `;
+}
+
+function renderCaptainCallout(captainCallout) {
+  if (!captainCallout) return "";
+  return `
+    <div class="callout callout--${captainCallout.verdict}">
+      <p class="callout__heading">Captain: ${captainCallout.player.name}</p>
+      <p class="callout__message">${captainCallout.message}</p>
+    </div>
+  `;
+}
+
+function renderBenchSuggestions(benchSuggestions) {
+  if (!benchSuggestions || benchSuggestions.length === 0) return "";
+  const items = benchSuggestions
+    .map(
+      ({ bench, starter }) => `
+        <li>
+          <strong>${bench.name}</strong> (${bench.projectedPoints.toFixed(1)} pts proj) could
+          outscore starting <strong>${starter.name}</strong>
+          (${starter.projectedPoints.toFixed(1)} pts proj) at ${starter.position}.
+        </li>
+      `
+    )
+    .join("");
+
+  return `
+    <div class="bench-suggestions">
+      <h3 class="bench-suggestions__heading">Bench vs. starter</h3>
+      <ul class="bench-suggestions__list">${items}</ul>
+    </div>
+  `;
+}
+
+// Tags each squad player with a (C)/(VC) name suffix and a "Bench" reason,
+// reusing `renderPlayerList`'s existing `reason` slot instead of adding a
+// new rendering path for a list shape that's otherwise identical to picks.
+function annotateSquadForDisplay(squad) {
+  return squad.map((player) => ({
+    ...player,
+    name: player.isCaptain ? `${player.name} (C)` : player.isViceCaptain ? `${player.name} (VC)` : player.name,
+    reason: player.isBench ? "Bench" : player.flagReason || undefined,
+  }));
+}
+
+function renderRateTeamResult(data) {
+  const container = document.getElementById("rate-team-result");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  const summary = document.createElement("div");
+  summary.className = "rate-team-summary";
+  summary.innerHTML =
+    renderGradeCard(data.grade, data.overallScore, data.gameweek) +
+    renderCaptainCallout(data.captainCallout) +
+    renderBenchSuggestions(data.benchSuggestions);
+  container.appendChild(summary);
+
+  const heading = document.createElement("h3");
+  heading.className = "section-heading";
+  heading.textContent = "Squad";
+  container.appendChild(heading);
+
+  const header = document.createElement("div");
+  header.className = "pick-header";
+  header.innerHTML = `
+    <span></span>
+    <span>Player</span>
+    <span>Fixture</span>
+    <span>Form</span>
+    <span>Score</span>
+  `;
+  container.appendChild(header);
+
+  const squadList = renderPlayerList(annotateSquadForDisplay(data.squad));
+  container.appendChild(squadList);
+}
+
+function initRateTeam() {
+  const form = document.getElementById("rate-team-form");
+  const input = document.getElementById("rate-team-input");
+  const submitButton = document.getElementById("rate-team-submit");
+  const result = document.getElementById("rate-team-result");
+  if (!form || !input || !result) return;
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+
+    const teamId = input.value.trim();
+    if (!teamId) return;
+
+    result.innerHTML = '<p class="board__loading">Rating your team…</p>';
+    submitButton.disabled = true;
+
+    fetch(`/api/rate-team/${encodeURIComponent(teamId)}`)
+      .then((res) =>
+        res.ok ? res.json() : res.json().then((body) => Promise.reject(new Error(body.error || "Request failed")))
+      )
+      .then((data) => {
+        renderRateTeamResult(data);
+      })
+      .catch((err) => {
+        result.innerHTML = `<p class="board__error">${err.message || "Could not rate this team right now."}</p>`;
+      })
+      .finally(() => {
+        submitButton.disabled = false;
+      });
+  });
+}
+
 initPlayerModal();
 initPlayerSearch();
 initPullToRefresh();
+initTabs();
+initRateTeam();
 loadCaptainPicks();
