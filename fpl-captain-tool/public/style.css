@@ -1038,6 +1038,28 @@ body.modal-open {
   color: var(--pitch-dark);
 }
 
+/* --- Boom-or-bust (volatility) badge --- */
+
+.pick__badge--volatile {
+  background: var(--hard);
+  color: var(--chalk);
+}
+
+.tier-group__badge {
+  display: inline-block;
+  flex-shrink: 0;
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: var(--hard);
+  color: var(--chalk);
+  white-space: nowrap;
+}
+
 /* --- Gameweek history --- */
 
 .gameweek-select-wrap {

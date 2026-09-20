@@ -96,19 +96,46 @@ const XGC_WEIGHT = 1; // xG conceded counts about the same as blended form
 const XG_SCALE = 10; // puts per-90 xG rates (~0–1) on FPL's 0–10 form scale
 const XGC_BREAKEVEN = 1.5; // ~per-match expected goals conceded that's "average"
 
+// How far a single gameweek's `form` value can jump week-over-week before
+// it's treated as a standout (or disastrous) one-off rather than a real
+// step-change in ability, and how far that jump gets pulled back toward
+// last week's value when it is. Only applies for one cycle: next gameweek's
+// snapshot becomes the new baseline, so a genuine step-change still shows
+// up in full within a week or two.
+const FORM_JUMP_DAMPENING_THRESHOLD = 3; // raw form-scale points, week-over-week
+const FORM_JUMP_DAMPENING_FACTOR = 0.5; // 0 = ignore the jump entirely, 1 = no damping
+
+// Softens a single standout (or disastrous) game's grip on the blended form
+// number by comparing raw `form` against last gameweek's cached snapshot
+// (see getPreviousFormById/saveGameweekSnapshot). `previousFormById` is null
+// when no snapshot is available yet (first gameweek, Redis unreachable) or
+// undefined for a given player when they weren't in the previous snapshot's
+// (partial) coverage — the check is skipped gracefully in either case and
+// the raw value is used as-is.
+function dampSingleGameJump(playerId, rawForm, previousFormById) {
+  const previousForm = previousFormById ? previousFormById.get(playerId) : undefined;
+  if (previousForm == null) return rawForm;
+
+  const jump = rawForm - previousForm;
+  if (Math.abs(jump) < FORM_JUMP_DAMPENING_THRESHOLD) return rawForm;
+
+  return previousForm + jump * FORM_JUMP_DAMPENING_FACTOR;
+}
+
 // Recent form blended with season-long points_per_game, so one huge or awful
 // match doesn't swing a player's number too far. This is the one blended
 // "how good is this player right now" number — qualityScore folds in xG on
 // top of it for scoring/projections, and getFormStatus (below) buckets it
 // for the trend arrows, the out-of-form list, and the modal's green/red tint.
-function blendedForm(p) {
-  const form = parseFloat(p.form) || 0;
+function blendedForm(p, previousFormById) {
+  const rawForm = parseFloat(p.form) || 0;
+  const form = dampSingleGameJump(p.id, rawForm, previousFormById);
   const pointsPerGame = parseFloat(p.points_per_game) || 0;
   return form * FORM_RECENCY_WEIGHT + pointsPerGame * FORM_SEASON_WEIGHT;
 }
 
-function qualityScore(p, position) {
-  const form = blendedForm(p);
+function qualityScore(p, position, previousFormById) {
+  const form = blendedForm(p, previousFormById);
 
   if (position === "MID" || position === "FWD") {
     const xgi = parseFloat(p.expected_goal_involvements_per_90);
@@ -140,8 +167,8 @@ function qualityScore(p, position) {
 const FORM_STATUS_GOOD_MIN = 5;
 const FORM_STATUS_BAD_MAX = 3;
 
-function getFormStatus(p) {
-  const value = blendedForm(p);
+function getFormStatus(p, previousFormById) {
+  const value = blendedForm(p, previousFormById);
   if (value >= FORM_STATUS_GOOD_MIN) return "good";
   if (value < FORM_STATUS_BAD_MAX) return "bad";
   return "neutral";
@@ -447,13 +474,13 @@ function generateReport(player, projectedPoints) {
 // per-gameweek lookups computed once in getCaptainPicks (fixtures, teams,
 // season goal/conceded totals, benchmarks).
 function buildPlayerRecord(p, ctx) {
-  const { teamFixture, teamsById, teamGoalsById, teamConcededById, benchmarks, gamesPlayed } = ctx;
+  const { teamFixture, teamsById, teamGoalsById, teamConcededById, benchmarks, gamesPlayed, previousFormById } = ctx;
 
   const fixture = teamFixture[p.team];
   const position = POSITION_NAMES[p.element_type] || "";
   const form = parseFloat(p.form) || 0;
-  const quality = qualityScore(p, position);
-  const formStatus = getFormStatus(p);
+  const quality = qualityScore(p, position, previousFormById);
+  const formStatus = getFormStatus(p, previousFormById);
   const fixtureScore = fixture ? 6 - fixture.difficulty : 3; // difficulty 1 (easy) -> 5, 5 (hard) -> 1
   const homeBonus = fixture && fixture.isHome ? 0.5 : 0;
   const score = Math.round((quality + fixtureScore * FIXTURE_WEIGHT + homeBonus) * 10) / 10;
@@ -485,6 +512,7 @@ function buildPlayerRecord(p, ctx) {
     trendingDown: formStatus === "bad",
     trendingUp: formStatus === "good",
     projectedPoints,
+    consistencyTag: null, // set by applyVolatilityAdjustments for the targeted top-of-position candidates it checks
     starts: p.starts || 0,
     cleanSheets: p.clean_sheets || 0,
     goalsConceded: p.goals_conceded || 0,
@@ -497,6 +525,78 @@ function buildPlayerRecord(p, ctx) {
   };
   player.report = generateReport(player, projectedPoints);
   return player;
+}
+
+// --- Consistency / volatility check -----------------------------------
+//
+// `score` above is built from recent form + xG, which both reward a player
+// coming off one huge haul just as much as one coming off five steady
+// decent games — this section tells those two apart. Deliberately scoped to
+// a *targeted* candidate list (each position's current top ~20 by score),
+// not the full player pool, since it costs one extra FPL API call per
+// candidate checked and hundreds of players would mean hundreds of calls
+// every cache cycle for players nowhere near the picks/tier lists anyway.
+const VOLATILITY_CANDIDATE_LIMIT = 20; // per position
+const VOLATILITY_CV_MIN_GAMES = 3; // need at least this many recent games to judge consistency
+// Calibrated against real mid-season data, not picked round: FPL's per-match
+// scoring is inherently lumpy (clean-sheet swings, one big attacking return
+// among quiet games), so with only a handful of gameweeks played, CV across
+// the top-of-position candidate pool typically spans ~0.3-1.5 with a median
+// around 0.7 — a 0.6 cutoff flagged 70%+ of picks as "boom-or-bust", which
+// defeats the point of a minority-outlier signal. 1.0 flags roughly the
+// top ~10-15% of that pool, in line with how tier lists elsewhere in this
+// app treat their own top slice (S tier = top ~10%).
+const VOLATILITY_CV_THRESHOLD = 1.0; // coefficient of variation (stddev / mean) at/above this = "boom-or-bust"
+const VOLATILITY_PENALTY_WEIGHT = 0.5; // flat score penalty applied to boom-or-bust players — tune here
+const VOLATILITY_FETCH_CONCURRENCY = 8; // parallel element-summary requests while checking volatility
+
+function coefficientOfVariation(values) {
+  const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+  if (mean <= 0) return null; // ratio isn't meaningful for a player who barely scored at all
+  const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance) / mean;
+}
+
+// Runs `fn` over `items` with at most `limit` in flight at once, so checking
+// ~80 candidates (20 per position x 4) doesn't fire that many requests at
+// FPL's API in the same instant.
+async function mapWithConcurrency(items, limit, fn) {
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor++;
+      await fn(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+// Flags and penalizes "boom-or-bust" players — high variance across their
+// last 5 gameweek point totals relative to the mean — rather than leaving
+// that risk hidden inside a score that reads the same whether it came from
+// five steady 6-point games or one 20-point haul and four blanks. Mutates
+// the given records in place: they're the same objects referenced from
+// recordsById, so both the score penalty and the consistencyTag carry
+// through to every section (picks, differentials, tier lists, ...) built
+// from those objects afterwards.
+async function applyVolatilityAdjustments(candidates) {
+  await mapWithConcurrency(candidates, VOLATILITY_FETCH_CONCURRENCY, async (player) => {
+    try {
+      const summary = await fetchJSON(`${FPL_BASE}/element-summary/${player.id}/`);
+      const lastFive = summary.history.slice(-5).map((h) => h.total_points);
+      if (lastFive.length < VOLATILITY_CV_MIN_GAMES) return;
+
+      const cv = coefficientOfVariation(lastFive);
+      if (cv == null || cv < VOLATILITY_CV_THRESHOLD) return;
+
+      player.consistencyTag = "Boom-or-bust";
+      player.score = Math.round((player.score - VOLATILITY_PENALTY_WEIGHT) * 10) / 10;
+    } catch (err) {
+      // One player's element-summary failing shouldn't take down the whole
+      // picks response — they just keep their un-penalized score and no tag.
+      console.error(`Volatility check failed for player ${player.id}:`, err);
+    }
+  });
 }
 
 // --- Tier lists --------------------------------------------------------
@@ -524,6 +624,31 @@ function buildTierList(pool) {
   });
 }
 
+// Reads last gameweek's cached snapshot (see saveGameweekSnapshot) to get
+// each player's `form` going into this gameweek, for dampSingleGameJump
+// above. The snapshot only covers last week's top-15-overall picks — not
+// every player — so this is necessarily partial coverage; callers already
+// treat a missing entry the same as no snapshot at all. Returns null (never
+// throws) when there's no previous gameweek, no saved snapshot for it, or
+// Redis is unreachable, so the dampening check is skipped gracefully rather
+// than breaking the picks response.
+async function getPreviousFormById(currentEventId) {
+  if (currentEventId <= 1) return null;
+  try {
+    const snapshot = await redis.get(`gameweek:${currentEventId - 1}`);
+    if (!snapshot || !Array.isArray(snapshot.picks)) return null;
+
+    const map = new Map();
+    snapshot.picks.forEach((p) => {
+      if (typeof p.form === "number") map.set(p.id, p.form);
+    });
+    return map;
+  } catch (err) {
+    console.error("Could not load previous gameweek's form for dampening:", err);
+    return null;
+  }
+}
+
 async function getCaptainPicks() {
   if (cache.data && Date.now() < cache.expires) {
     return cache.data;
@@ -540,6 +665,7 @@ async function getCaptainPicks() {
   }
 
   const fixtures = await fetchJSON(`${FPL_BASE}/fixtures/?event=${nextEvent.id}`);
+  const previousFormById = await getPreviousFormById(nextEvent.id);
 
   const teamsById = {};
   bootstrap.teams.forEach((t) => {
@@ -576,7 +702,7 @@ async function getCaptainPicks() {
   const benchmarks = computeBenchmarks(bootstrap);
   const gamesPlayed = getGamesPlayed(bootstrap);
 
-  const recordCtx = { teamFixture, teamsById, teamGoalsById, teamConcededById, benchmarks, gamesPlayed };
+  const recordCtx = { teamFixture, teamsById, teamGoalsById, teamConcededById, benchmarks, gamesPlayed, previousFormById };
 
   // Every player gets a record, not just the ones eligible for the picks
   // sections below — avoidThisWeek pulls from a wider pool (any player above
@@ -598,6 +724,19 @@ async function getCaptainPicks() {
     )
     .filter((p) => teamFixture[p.team]) // has a fixture this gameweek
     .map((p) => recordsById[p.id]);
+
+  // Targeted volatility check (see applyVolatilityAdjustments above): each
+  // position's current top ~20 by score, not the full pool. Mutates those
+  // records' score/consistencyTag in place, so it has to run before picks,
+  // differentials, avoidThisWeek, outOfForm, trending, and tierLists below
+  // are built — they all sort/slice by score and need the adjusted number.
+  const volatilityCandidates = POSITION_ORDER.flatMap((pos) =>
+    scoredPlayers
+      .filter((p) => p.position === pos)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, VOLATILITY_CANDIDATE_LIMIT)
+  );
+  await applyVolatilityAdjustments(volatilityCandidates);
 
   // Top 15 per position, merged, rather than a single top-15-overall cut —
   // keeps every position fully represented so the position filter chips on
@@ -811,8 +950,14 @@ async function getPlayerDetail(id) {
   const summary = await fetchJSON(`${FPL_BASE}/element-summary/${id}/`);
   const form = parseFloat(player.form) || 0;
   const position = POSITION_NAMES[player.element_type] || "";
-  const quality = qualityScore(player, position);
-  const formStatus = getFormStatus(player);
+
+  // Same dampening as the picks list (see dampSingleGameJump) so a player's
+  // quality/form status can't disagree between the list and this modal.
+  const currentEvent = bootstrap.events.find((e) => e.is_next) || bootstrap.events.find((e) => e.is_current);
+  const previousFormById = currentEvent ? await getPreviousFormById(currentEvent.id) : null;
+
+  const quality = qualityScore(player, position, previousFormById);
+  const formStatus = getFormStatus(player, previousFormById);
   const team = teamsById[player.team];
 
   const lastFive = summary.history

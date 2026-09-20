@@ -195,6 +195,10 @@ function renderPlayerList(players, options = {}) {
         : player.isSleeperPick
         ? '<span class="pick__badge pick__badge--sleeper">Sleeper pick</span>'
         : ""
+    }${
+      player.consistencyTag === "Boom-or-bust"
+        ? '<span class="pick__badge pick__badge--volatile">Boom-or-bust</span>'
+        : ""
     }</span>
           <span class="pick__meta">${player.position} · ${teamBadgeMarkup(player)}${player.team} · £${player.price}m${
       player.reason ? ` · <span class="pick__reason">${player.reason}</span>` : ""
@@ -380,6 +384,11 @@ function renderTierGroup(tier, players) {
         <li class="tier-group__row">
           ${playerPhotoMarkup(player)}
           <span class="tier-group__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button></span>
+          ${
+            player.consistencyTag === "Boom-or-bust"
+              ? '<span class="tier-group__badge">Boom-or-bust</span>'
+              : ""
+          }
           <span class="tier-group__meta">${teamBadgeMarkup(player)}${player.team}</span>
           <span class="tier-group__score">${player.score.toFixed(1)}</span>
         </li>
