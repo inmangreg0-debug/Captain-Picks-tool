@@ -415,9 +415,9 @@ function generateReport(player, projectedPoints) {
 }
 
 // Builds the one scored player record shared by every section of the app
-// (picks, differentials, avoid, out-of-form, trending, and Rate My Team) —
-// used to be duplicated near-verbatim in four places, which is exactly how
-// the GKP cap fix above only landed in one of them. `ctx` carries the
+// (picks, differentials, avoid, out-of-form, trending) — used to be
+// duplicated near-verbatim in four places, which is exactly how the GKP cap
+// fix above only landed in one of them. `ctx` carries the
 // per-gameweek lookups computed once in getCaptainPicks (fixtures, teams,
 // season goal/conceded totals, benchmarks).
 function buildPlayerRecord(p, ctx) {
@@ -553,8 +553,10 @@ async function getCaptainPicks() {
   const recordCtx = { teamFixture, teamsById, teamGoalsById, teamConcededById, benchmarks, gamesPlayed };
 
   // Every player gets a record, not just the ones eligible for the picks
-  // sections below — Rate My Team needs to look up *any* squad player
-  // (including ones benched for low minutes or injury) by id.
+  // sections below — avoidThisWeek pulls from a wider pool (any player above
+  // the ownership threshold, including injury/rotation doubts) than
+  // scoredPlayers' regularly-playing filter, so it needs to look up records
+  // for players outside that pool too.
   const recordsById = {};
   bootstrap.elements.forEach((p) => {
     recordsById[p.id] = buildPlayerRecord(p, recordCtx);
@@ -694,10 +696,6 @@ async function getCaptainPicks() {
     trendingUp,
     trendingDown,
     tierLists,
-    // Internal only — every player's record keyed by id, so Rate My Team
-    // can look up arbitrary squad players without recomputing scores.
-    // Stripped out before this gets sent as the /api/captain-picks response.
-    _recordsById: recordsById,
   };
 
   cache = { data: result, expires: Date.now() + CACHE_MS };
@@ -764,208 +762,13 @@ app.get("/api/gameweeks", async (req, res) => {
 
 app.get("/api/captain-picks", async (req, res) => {
   try {
-    const { _recordsById, ...picks } = await getCaptainPicks();
+    const picks = await getCaptainPicks();
     res.json(picks);
   } catch (err) {
     console.error(err);
     res.status(500).json({
       error: "Could not load captain picks right now. Try again shortly.",
     });
-  }
-});
-
-// --- Rate My Team ------------------------------------------------------
-
-// Score -> letter grade. Thresholds are calibrated against the observed
-// range of real player scores (roughly 0-16 this season: weak bench
-// fodder near the bottom, elite in-form players with kind fixtures near
-// the top) — retune here if the underlying score formula changes shape.
-function scoreToGrade(score) {
-  if (score >= 12) return "A";
-  if (score >= 9.5) return "B";
-  if (score >= 7) return "C";
-  if (score >= 4.5) return "D";
-  return "F";
-}
-
-// Shared between the Team-ID and manual-squad Rate My Team paths: a player
-// is "flagged" if they show up in this gameweek's avoidThisWeek or
-// outOfForm sections, with the specific reason(s) why.
-function makeFlagReasonFor(data) {
-  const outOfFormIds = new Set(data.outOfForm.map((p) => p.id));
-  const avoidReasonById = new Map(data.avoidThisWeek.map((p) => [p.id, p.reason]));
-
-  return function flagReasonFor(id) {
-    const parts = [];
-    if (avoidReasonById.has(id)) parts.push(avoidReasonById.get(id));
-    if (outOfFormIds.has(id)) parts.push("Out of form");
-    return parts.join(" · ") || null;
-  };
-}
-
-app.get("/api/rate-team/:teamId", async (req, res) => {
-  const teamId = Number(req.params.teamId);
-  if (!Number.isInteger(teamId) || teamId <= 0) {
-    return res.status(400).json({ error: "Enter a valid numeric Team ID." });
-  }
-
-  try {
-    const data = await getCaptainPicks();
-    const bootstrap = await getBootstrap();
-    const currentEvent =
-      bootstrap.events.find((e) => e.is_current) ||
-      bootstrap.events.find((e) => e.is_next) ||
-      bootstrap.events.slice().reverse().find((e) => e.finished);
-
-    if (!currentEvent) {
-      return res.status(500).json({ error: "Could not determine the current gameweek." });
-    }
-
-    const picksUrl = `${FPL_BASE}/entry/${teamId}/event/${currentEvent.id}/picks/`;
-    let picksPayload;
-    try {
-      const picksRes = await fetch(picksUrl);
-      // A bad/nonexistent Team ID doesn't reliably come back as 404 from
-      // FPL (large/malformed ids have also been seen returning 503) — any
-      // non-OK response for a request we built correctly means the ID is
-      // the problem, not our request or their uptime.
-      if (!picksRes.ok) {
-        return res.status(404).json({ error: "Team not found. Double-check the Team ID and try again." });
-      }
-      picksPayload = await picksRes.json();
-    } catch (err) {
-      console.error(err);
-      return res.status(502).json({ error: "Could not reach the FPL API right now. Try again shortly." });
-    }
-
-    const flagReasonFor = makeFlagReasonFor(data);
-
-    const recordsById = data._recordsById;
-    const squad = (picksPayload.picks || [])
-      .map((pick) => {
-        const record = recordsById[pick.element];
-        if (!record) return null;
-        return {
-          ...record,
-          isCaptain: pick.is_captain,
-          isViceCaptain: pick.is_vice_captain,
-          isBench: pick.position > 11,
-          squadPosition: pick.position,
-          flagReason: flagReasonFor(record.id),
-        };
-      })
-      .filter(Boolean);
-
-    if (squad.length === 0) {
-      return res.status(404).json({ error: "Could not load this team's squad. Double-check the Team ID and try again." });
-    }
-
-    const overallScore = squad.reduce((sum, p) => sum + p.score, 0) / squad.length;
-    const grade = scoreToGrade(overallScore);
-
-    // "Top captain picks" = the highest-scoring players overall this
-    // gameweek, across every position (not just top-of-position), since a
-    // captain choice competes against every other player, not just peers.
-    const topCaptainIds = new Set(
-      [...data.picks].sort((a, b) => b.score - a.score).slice(0, 5).map((p) => p.id)
-    );
-
-    const captainPlayer = squad.find((p) => p.isCaptain) || null;
-    let captainCallout = null;
-    if (captainPlayer) {
-      if (captainPlayer.flagReason) {
-        captainCallout = {
-          player: captainPlayer,
-          verdict: "poor",
-          message: `${captainPlayer.name} is flagged this week (${captainPlayer.flagReason}) — the armband might be better elsewhere.`,
-        };
-      } else if (topCaptainIds.has(captainPlayer.id)) {
-        captainCallout = {
-          player: captainPlayer,
-          verdict: "good",
-          message: `${captainPlayer.name} is one of this week's top-rated players — a solid captain choice.`,
-        };
-      } else {
-        captainCallout = {
-          player: captainPlayer,
-          verdict: "neutral",
-          message: `${captainPlayer.name} isn't among this week's top-rated picks, but there's no major red flag either.`,
-        };
-      }
-    }
-
-    const flaggedPlayers = squad.filter((p) => p.flagReason);
-
-    const starters = squad.filter((p) => !p.isBench);
-    const bench = squad.filter((p) => p.isBench);
-    const benchSuggestions = bench
-      .map((benchPlayer) => {
-        const worseStarter = starters
-          .filter((s) => s.position === benchPlayer.position && s.projectedPoints < benchPlayer.projectedPoints)
-          .sort((a, b) => a.projectedPoints - b.projectedPoints)[0];
-        return worseStarter ? { bench: benchPlayer, starter: worseStarter } : null;
-      })
-      .filter(Boolean);
-
-    res.json({
-      teamId,
-      gameweek: currentEvent.name,
-      overallScore: Math.round(overallScore * 10) / 10,
-      grade,
-      squad,
-      captainCallout,
-      flaggedPlayers,
-      benchSuggestions,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Could not rate this team right now. Try again shortly." });
-  }
-});
-
-// Manual-squad path: same grading as /api/rate-team, but for a squad built
-// by hand via player search rather than pulled from a real FPL team. There's
-// no captain and no bench/starter split for a hand-picked list of 15, so
-// those two checks are intentionally skipped — this just grades the 15
-// players' combined strength and flags any that are risky/out of form.
-app.post("/api/rate-squad", async (req, res) => {
-  const playerIds = Array.isArray(req.body?.playerIds) ? req.body.playerIds.map(Number) : null;
-
-  if (!playerIds || playerIds.length !== 15 || playerIds.some((id) => !Number.isInteger(id) || id <= 0)) {
-    return res.status(400).json({ error: "Provide exactly 15 valid player IDs." });
-  }
-  if (new Set(playerIds).size !== 15) {
-    return res.status(400).json({ error: "Each player can only be picked once." });
-  }
-
-  try {
-    const data = await getCaptainPicks();
-    const recordsById = data._recordsById;
-
-    const squad = playerIds.map((id) => recordsById[id]).filter(Boolean);
-    if (squad.length !== 15) {
-      return res.status(400).json({ error: "One or more player IDs weren't recognized." });
-    }
-
-    const flagReasonFor = makeFlagReasonFor(data);
-    const squadWithFlags = squad.map((p) => ({ ...p, flagReason: flagReasonFor(p.id) }));
-
-    const overallScore = squadWithFlags.reduce((sum, p) => sum + p.score, 0) / squadWithFlags.length;
-    const grade = scoreToGrade(overallScore);
-    const flaggedPlayers = squadWithFlags.filter((p) => p.flagReason);
-
-    res.json({
-      gameweek: data.gameweek,
-      overallScore: Math.round(overallScore * 10) / 10,
-      grade,
-      squad: squadWithFlags,
-      captainCallout: null,
-      flaggedPlayers,
-      benchSuggestions: [],
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Could not rate this squad right now. Try again shortly." });
   }
 });
 
@@ -1084,6 +887,12 @@ async function getPlayerDetail(id) {
     report,
     lastFive,
     nextFive,
+    yellowCards: player.yellow_cards || 0,
+    redCards: player.red_cards || 0,
+    tackles: player.tackles || 0,
+    clearancesBlocksInterceptions: player.clearances_blocks_interceptions || 0,
+    recoveries: player.recoveries || 0,
+    defensiveContribution: player.defensive_contribution || 0,
   };
 }
 

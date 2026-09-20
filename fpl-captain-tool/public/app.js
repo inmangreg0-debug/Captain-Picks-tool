@@ -11,6 +11,9 @@ let allPicks = [];
 let boardFilter = "All";
 let boardSort = "score";
 
+let allTierLists = null;
+let tierPositionFilter = "MID";
+
 function formatNetTransfers(n) {
   const sign = n >= 0 ? "+" : "−";
   const abs = Math.abs(n);
@@ -388,14 +391,40 @@ function renderTierGroup(tier, players) {
   return group;
 }
 
-function renderTierColumn(position, players) {
+function renderTierPositionChips() {
+  const wrap = document.getElementById("tier-position-chips");
+  if (!wrap) return;
+
+  wrap.innerHTML = "";
+  ["GKP", "DEF", "MID", "FWD"].forEach((pos) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "filter-chip" + (tierPositionFilter === pos ? " is-active" : "");
+    chip.textContent = pos;
+    chip.addEventListener("click", () => {
+      if (tierPositionFilter === pos) return;
+      tierPositionFilter = pos;
+      renderTierBoard();
+    });
+    wrap.appendChild(chip);
+  });
+}
+
+// Renders only the currently-selected position's tiers — a client-side
+// filter over `allTierLists`, which already holds every position, so
+// switching chips never re-fetches.
+function renderTierBoard() {
+  const board = document.getElementById("tier-board");
+  if (!board) return;
+
+  renderTierPositionChips();
+
+  board.innerHTML = "";
+  if (!allTierLists) return;
+
+  const players = allTierLists[tierPositionFilter] || [];
   const column = document.createElement("div");
   column.className = "tier-board__column";
-
-  const heading = document.createElement("h3");
-  heading.className = "tier-board__position-heading";
-  heading.textContent = position;
-  column.appendChild(heading);
 
   TIER_ORDER.forEach((tier) => {
     const tierPlayers = players.filter((p) => p.tier === tier);
@@ -403,22 +432,12 @@ function renderTierColumn(position, players) {
     column.appendChild(renderTierGroup(tier, tierPlayers));
   });
 
-  return column;
+  board.appendChild(column);
 }
 
 function renderTierList(tierLists) {
-  const board = document.getElementById("tier-board");
-  if (!board) return;
-
-  board.innerHTML = "";
-  if (!tierLists) return;
-
-  const columns = document.createElement("div");
-  columns.className = "tier-board__columns";
-  ["GKP", "DEF", "MID", "FWD"].forEach((pos) => {
-    columns.appendChild(renderTierColumn(pos, tierLists[pos] || []));
-  });
-  board.appendChild(columns);
+  allTierLists = tierLists || null;
+  renderTierBoard();
 }
 
 function playerFixtureRow(entry, kind) {
@@ -440,6 +459,21 @@ function playerFixtureRow(entry, kind) {
       <td>${entry.projectedPoints.toFixed(1)}</td>
     </tr>
   `;
+}
+
+// DEF/MID get the full breakdown (cards + grouped defensive-contribution
+// stats) since that's where defensive output actually swings fantasy value;
+// GKP/FWD get just the card count, kept brief since tackles/CBI/recoveries
+// rarely matter for those positions.
+function playerStatsRowHtml(detail) {
+  const cardsHtml = `<span class="player-modal__stats-cards">${detail.yellowCards} yellow, ${detail.redCards} red</span>`;
+
+  if (detail.position !== "DEF" && detail.position !== "MID") {
+    return `<p class="player-modal__stats-row player-modal__stats-row--brief">${cardsHtml}</p>`;
+  }
+
+  const defenseHtml = `<span class="player-modal__stats-defense">${detail.tackles} tackles · ${detail.clearancesBlocksInterceptions} CBI · ${detail.recoveries} recoveries · ${detail.defensiveContribution} DC pts this season</span>`;
+  return `<p class="player-modal__stats-row">${cardsHtml}${defenseHtml}</p>`;
 }
 
 function renderPlayerModalContent(detail) {
@@ -470,6 +504,7 @@ function renderPlayerModalContent(detail) {
     ${photoHtml}
     <h2 id="player-modal-name" class="player-modal__title">${detail.name}</h2>
     <p class="player-modal__meta">${detail.position} · ${detail.team} · Form ${detail.form.toFixed(1)}</p>
+    ${playerStatsRowHtml(detail)}
     ${positiveHtml}
     ${negativeHtml}
     ${reportHtml}
@@ -668,8 +703,7 @@ async function loadGameweekSnapshot(id) {
     const section = document.getElementById(sectionId);
     if (section) section.innerHTML = "";
   });
-  const tierBoard = document.getElementById("tier-board");
-  if (tierBoard) tierBoard.innerHTML = "";
+  renderTierList(null);
 
   try {
     const res = await fetch(`/api/gameweek/${id}`);
@@ -904,7 +938,6 @@ function initPullToRefresh() {
 function initTabs() {
   const tabs = [
     { btn: "tab-btn-picks", view: "view-picks", title: "Who to captain this week" },
-    { btn: "tab-btn-rate-team", view: "view-rate-team", title: "Rate your squad" },
     { btn: "tab-btn-tier-list", view: "view-tier-list", title: "Tier list" },
   ];
   const pageTitle = document.getElementById("page-title");
@@ -928,254 +961,9 @@ function initTabs() {
   });
 }
 
-// --- Rate My Team ----------------------------------------------------------
-
-function renderGradeCard(grade, overallScore, gameweek) {
-  const gradeClass = ["A", "B"].includes(grade)
-    ? "good"
-    : grade === "C"
-    ? "medium"
-    : "bad";
-
-  return `
-    <div class="grade-card grade-card--${gradeClass}">
-      <span class="grade-card__letter">${grade}</span>
-      <span class="grade-card__meta">
-        <span class="grade-card__score">Squad score: ${overallScore.toFixed(1)}</span>
-        <span class="grade-card__gw">${gameweek}</span>
-      </span>
-    </div>
-  `;
-}
-
-function renderCaptainCallout(captainCallout) {
-  if (!captainCallout) return "";
-  return `
-    <div class="callout callout--${captainCallout.verdict}">
-      <p class="callout__heading">Captain: ${captainCallout.player.name}</p>
-      <p class="callout__message">${captainCallout.message}</p>
-    </div>
-  `;
-}
-
-function renderBenchSuggestions(benchSuggestions) {
-  if (!benchSuggestions || benchSuggestions.length === 0) return "";
-  const items = benchSuggestions
-    .map(
-      ({ bench, starter }) => `
-        <li>
-          <strong>${bench.name}</strong> (${bench.projectedPoints.toFixed(1)} pts proj) could
-          outscore starting <strong>${starter.name}</strong>
-          (${starter.projectedPoints.toFixed(1)} pts proj) at ${starter.position}.
-        </li>
-      `
-    )
-    .join("");
-
-  return `
-    <div class="bench-suggestions">
-      <h3 class="bench-suggestions__heading">Bench vs. starter</h3>
-      <ul class="bench-suggestions__list">${items}</ul>
-    </div>
-  `;
-}
-
-// Tags each squad player with a (C)/(VC) name suffix and a "Bench" reason,
-// reusing `renderPlayerList`'s existing `reason` slot instead of adding a
-// new rendering path for a list shape that's otherwise identical to picks.
-function annotateSquadForDisplay(squad) {
-  return squad.map((player) => ({
-    ...player,
-    name: player.isCaptain ? `${player.name} (C)` : player.isViceCaptain ? `${player.name} (VC)` : player.name,
-    reason: player.isBench ? "Bench" : player.flagReason || undefined,
-  }));
-}
-
-function renderRateTeamResult(data) {
-  const container = document.getElementById("rate-team-result");
-  if (!container) return;
-
-  container.innerHTML = "";
-
-  const summary = document.createElement("div");
-  summary.className = "rate-team-summary";
-  summary.innerHTML =
-    renderGradeCard(data.grade, data.overallScore, data.gameweek) +
-    renderCaptainCallout(data.captainCallout) +
-    renderBenchSuggestions(data.benchSuggestions);
-  container.appendChild(summary);
-
-  const heading = document.createElement("h3");
-  heading.className = "section-heading";
-  heading.textContent = "Squad";
-  container.appendChild(heading);
-
-  const header = document.createElement("div");
-  header.className = "pick-header";
-  header.innerHTML = `
-    <span></span>
-    <span>Player</span>
-    <span>Fixture</span>
-    <span>Form</span>
-    <span>Score</span>
-  `;
-  container.appendChild(header);
-
-  const squadList = renderPlayerList(annotateSquadForDisplay(data.squad));
-  container.appendChild(squadList);
-}
-
-function initRateTeam() {
-  const form = document.getElementById("rate-team-form");
-  const input = document.getElementById("rate-team-input");
-  const submitButton = document.getElementById("rate-team-submit");
-  const result = document.getElementById("rate-team-result");
-  if (!form || !input || !result) return;
-
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-
-    const teamId = input.value.trim();
-    if (!teamId) return;
-
-    result.innerHTML = '<p class="board__loading">Rating your team…</p>';
-    submitButton.disabled = true;
-
-    fetch(`/api/rate-team/${encodeURIComponent(teamId)}`)
-      .then((res) =>
-        res.ok ? res.json() : res.json().then((body) => Promise.reject(new Error(body.error || "Request failed")))
-      )
-      .then((data) => {
-        renderRateTeamResult(data);
-      })
-      .catch((err) => {
-        result.innerHTML = `<p class="board__error">${err.message || "Could not rate this team right now."}</p>`;
-      })
-      .finally(() => {
-        submitButton.disabled = false;
-      });
-  });
-}
-
-// --- Rate My Team: mode toggle (Team ID vs. manual squad builder) ---------
-
-function initRateTeamModeToggle() {
-  const modes = [
-    { btn: "mode-btn-team-id", el: "rate-team-form" },
-    { btn: "mode-btn-build", el: "squad-builder" },
-  ];
-  const result = document.getElementById("rate-team-result");
-
-  modes.forEach(({ btn }) => {
-    const button = document.getElementById(btn);
-    if (!button) return;
-    button.addEventListener("click", () => {
-      modes.forEach(({ btn: otherBtn, el: otherElId }) => {
-        const otherButton = document.getElementById(otherBtn);
-        const otherEl = document.getElementById(otherElId);
-        const isActive = otherBtn === btn;
-        if (otherButton) {
-          otherButton.classList.toggle("is-active", isActive);
-          otherButton.setAttribute("aria-pressed", String(isActive));
-        }
-        if (otherEl) otherEl.hidden = !isActive;
-      });
-      if (result) result.innerHTML = "";
-    });
-  });
-}
-
-// --- Rate My Team: manual squad builder -----------------------------------
-
-let squadBuilderPicks = [];
-
-function renderSquadBuilderList() {
-  const list = document.getElementById("squad-builder-list");
-  const count = document.getElementById("squad-builder-count");
-  const submit = document.getElementById("squad-builder-submit");
-  if (!list || !count || !submit) return;
-
-  count.textContent = `${squadBuilderPicks.length}/15 selected`;
-
-  list.innerHTML = squadBuilderPicks
-    .map(
-      (p) => `
-        <li class="squad-builder__item">
-          ${playerPhotoMarkup(p)}
-          <span class="squad-builder__text">
-            <span class="squad-builder__name">${p.name}</span>
-            <span class="squad-builder__meta">${p.position} · ${p.team}</span>
-          </span>
-          <button type="button" class="squad-builder__remove" data-player-id="${p.id}" aria-label="Remove ${p.name}">&times;</button>
-        </li>
-      `
-    )
-    .join("");
-
-  submit.hidden = squadBuilderPicks.length !== 15;
-}
-
-function initSquadBuilder() {
-  const searchWrap = document.getElementById("squad-builder-search-wrap");
-  const input = document.getElementById("squad-builder-search");
-  const resultsList = document.getElementById("squad-builder-search-results");
-  const list = document.getElementById("squad-builder-list");
-  const submit = document.getElementById("squad-builder-submit");
-  const result = document.getElementById("rate-team-result");
-  if (!searchWrap || !input || !resultsList || !list || !submit || !result) return;
-
-  initPlayerSearchDropdown({
-    containerEl: searchWrap,
-    inputEl: input,
-    resultsEl: resultsList,
-    onSelect: (player) => {
-      if (squadBuilderPicks.length >= 15) return;
-      if (squadBuilderPicks.some((p) => String(p.id) === String(player.id))) return;
-      squadBuilderPicks.push(player);
-      renderSquadBuilderList();
-      input.value = "";
-    },
-  });
-
-  list.addEventListener("click", (e) => {
-    const button = e.target.closest(".squad-builder__remove[data-player-id]");
-    if (!button) return;
-    squadBuilderPicks = squadBuilderPicks.filter((p) => String(p.id) !== button.dataset.playerId);
-    renderSquadBuilderList();
-  });
-
-  submit.addEventListener("click", () => {
-    if (squadBuilderPicks.length !== 15) return;
-
-    result.innerHTML = '<p class="board__loading">Rating your team…</p>';
-    submit.disabled = true;
-
-    fetch("/api/rate-squad", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ playerIds: squadBuilderPicks.map((p) => Number(p.id)) }),
-    })
-      .then((res) =>
-        res.ok ? res.json() : res.json().then((body) => Promise.reject(new Error(body.error || "Request failed")))
-      )
-      .then((data) => {
-        renderRateTeamResult(data);
-      })
-      .catch((err) => {
-        result.innerHTML = `<p class="board__error">${err.message || "Could not rate this squad right now."}</p>`;
-      })
-      .finally(() => {
-        submit.disabled = false;
-      });
-  });
-}
-
 initPlayerModal();
 initPlayerSearch();
 initPullToRefresh();
 initTabs();
-initRateTeam();
-initRateTeamModeToggle();
-initSquadBuilder();
 initGameweekSelect();
 loadCaptainPicks();
