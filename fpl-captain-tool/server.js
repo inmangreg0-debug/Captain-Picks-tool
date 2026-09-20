@@ -14,6 +14,7 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+import { Redis } from "@upstash/redis";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,6 +26,11 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 
 const FPL_BASE = "https://fantasy.premierleague.com/api";
+
+// Vercel's Upstash integration sets KV_REST_API_URL / KV_REST_API_TOKEN;
+// Redis.fromEnv() picks those up automatically.
+const redis = Redis.fromEnv();
+const GAMEWEEK_INDEX_KEY = "gameweeks:index";
 
 // Simple in-memory cache. Good enough for an MVP with one server instance;
 // swap for a real cache (Redis, or Vercel KV) once this moves off a single box.
@@ -467,6 +473,31 @@ function buildPlayerRecord(p, ctx) {
   return player;
 }
 
+// --- Tier lists --------------------------------------------------------
+//
+// Buckets a position's scored-player pool into tiers (S/A/B/C/D) based on
+// each player's rank within that position's own score distribution this
+// gameweek, rather than fixed score thresholds — form and fixtures shift
+// week to week, so a fixed cutoff would drift out of sync with what's
+// actually a strong score for that position right now.
+const TIER_CUTOFFS = [
+  { tier: "S", cumulative: 0.1 }, // top ~10%
+  { tier: "A", cumulative: 0.3 }, // next ~20%
+  { tier: "B", cumulative: 0.55 },
+  { tier: "C", cumulative: 0.8 },
+  { tier: "D", cumulative: 1 },
+];
+
+function buildTierList(pool) {
+  const sorted = [...pool].sort((a, b) => b.score - a.score);
+  const n = sorted.length;
+  return sorted.map((player, index) => {
+    const rankFraction = (index + 1) / n;
+    const cutoff = TIER_CUTOFFS.find((c) => rankFraction <= c.cumulative) || TIER_CUTOFFS[TIER_CUTOFFS.length - 1];
+    return { ...player, tier: cutoff.tier };
+  });
+}
+
 async function getCaptainPicks() {
   if (cache.data && Date.now() < cache.expires) {
     return cache.data;
@@ -565,12 +596,19 @@ async function getCaptainPicks() {
   // Same per-position depth treatment as `picks` above, except goalkeepers
   // are capped (see GKP_CAP above) so the section isn't just a wall of
   // similarly-scored keepers.
+  // Cloned (not the shared recordsById objects) so flagging the top
+  // differential below can't leak isSleeperPick onto the same player's
+  // entry in picks/outOfForm/etc., which reference those objects directly.
   const differentials = POSITION_ORDER.flatMap((pos) =>
     scoredPlayers
       .filter((p) => p.position === pos && parseFloat(p.ownership) < OWNERSHIP_DIFFERENTIAL_MAX)
       .sort((a, b) => b.score - a.score)
       .slice(0, pos === "GKP" ? GKP_CAP : 15)
-  );
+  ).map((p) => ({ ...p }));
+
+  if (differentials.length > 0) {
+    [...differentials].sort((a, b) => b.score - a.score)[0].isSleeperPick = true;
+  }
 
   // Widely-owned players worth a second thought. This pool intentionally
   // skips the availability/minutes filters above, since injury and rotation
@@ -640,6 +678,11 @@ async function getCaptainPicks() {
     .sort((a, b) => a.netTransfers - b.netTransfers)
     .slice(0, 15);
 
+  const tierLists = {};
+  POSITION_ORDER.forEach((pos) => {
+    tierLists[pos] = buildTierList(scoredPlayers.filter((p) => p.position === pos));
+  });
+
   const result = {
     gameweek: nextEvent.name,
     eventId: nextEvent.id,
@@ -650,6 +693,7 @@ async function getCaptainPicks() {
     outOfForm,
     trendingUp,
     trendingDown,
+    tierLists,
     // Internal only — every player's record keyed by id, so Rate My Team
     // can look up arbitrary squad players without recomputing scores.
     // Stripped out before this gets sent as the /api/captain-picks response.
@@ -657,8 +701,66 @@ async function getCaptainPicks() {
   };
 
   cache = { data: result, expires: Date.now() + CACHE_MS };
+
+  try {
+    await saveGameweekSnapshot(result);
+  } catch (err) {
+    // Redis being unreachable shouldn't break the live picks response.
+    console.error("Failed to save gameweek snapshot:", err);
+  }
+
   return result;
 }
+
+// Saves a one-time-per-gameweek snapshot (top 15 picks by score) so past
+// gameweeks stay browsable after they roll over. Guarded by an existence
+// check so repeated cache refreshes within the same gameweek don't keep
+// re-writing it.
+async function saveGameweekSnapshot(result) {
+  const key = `gameweek:${result.eventId}`;
+  const alreadySaved = await redis.exists(key);
+  if (alreadySaved) return;
+
+  const topPicks = [...result.picks].sort((a, b) => b.score - a.score).slice(0, 15);
+  const snapshot = {
+    gameweek: result.gameweek,
+    eventId: result.eventId,
+    deadline: result.deadline,
+    picks: topPicks,
+  };
+
+  await redis.set(key, snapshot);
+  await redis.sadd(GAMEWEEK_INDEX_KEY, result.eventId);
+}
+
+app.get("/api/gameweek/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Invalid gameweek id" });
+  }
+
+  try {
+    const snapshot = await redis.get(`gameweek:${id}`);
+    if (!snapshot) {
+      return res.status(404).json({ error: "No saved snapshot for that gameweek." });
+    }
+    res.json(snapshot);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not load that gameweek right now. Try again shortly." });
+  }
+});
+
+app.get("/api/gameweeks", async (req, res) => {
+  try {
+    const ids = await redis.smembers(GAMEWEEK_INDEX_KEY);
+    const gameweeks = ids.map(Number).sort((a, b) => b - a);
+    res.json({ gameweeks });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not load saved gameweeks right now. Try again shortly." });
+  }
+});
 
 app.get("/api/captain-picks", async (req, res) => {
   try {

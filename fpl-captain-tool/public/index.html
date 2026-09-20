@@ -21,10 +21,21 @@
   <nav class="tabs" role="tablist" aria-label="View">
     <button type="button" class="tab-btn is-active" id="tab-btn-picks" role="tab" aria-selected="true" aria-controls="view-picks">Captain Picks</button>
     <button type="button" class="tab-btn" id="tab-btn-rate-team" role="tab" aria-selected="false" aria-controls="view-rate-team">Rate My Team</button>
+    <button type="button" class="tab-btn" id="tab-btn-tier-list" role="tab" aria-selected="false" aria-controls="view-tier-list">Tier List</button>
   </nav>
 
   <main>
     <div class="view" id="view-picks" role="tabpanel" aria-labelledby="tab-btn-picks">
+    <div class="gameweek-select-wrap">
+      <label class="gameweek-select__label" for="gameweek-select">Gameweek</label>
+      <select id="gameweek-select" class="gameweek-select">
+        <option value="current">Current Gameweek</option>
+      </select>
+    </div>
+    <p class="past-gameweek-banner" id="past-gameweek-banner" hidden>
+      Viewing a past gameweek — this is a saved snapshot, not live or editable.
+    </p>
+
     <section class="player-search" id="player-search">
       <input
         type="search"
@@ -198,6 +209,15 @@
       </div>
 
       <section class="rate-team-result" id="rate-team-result" aria-live="polite"></section>
+    </div>
+
+    <div class="view" id="view-tier-list" role="tabpanel" aria-labelledby="tab-btn-tier-list" hidden>
+      <p class="section-caption">
+        Players within each position, grouped into tiers by how their score
+        this gameweek compares to their position's own distribution — S is
+        the top ~10%, A the next ~20%, then B, C, and D.
+      </p>
+      <section class="tier-board" id="tier-board" aria-live="polite"></section>
     </div>
   </main>
 

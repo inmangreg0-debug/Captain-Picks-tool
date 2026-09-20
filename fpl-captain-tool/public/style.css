@@ -1264,6 +1264,131 @@ body.modal-open {
   cursor: pointer;
 }
 
+/* --- Sleeper pick badge --- */
+
+.pick__badge--sleeper {
+  background: var(--easy);
+  color: var(--pitch-dark);
+}
+
+/* --- Gameweek history --- */
+
+.gameweek-select-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 1.25rem;
+}
+
+.gameweek-select__label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--sage);
+}
+
+.gameweek-select {
+  min-height: 40px;
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--pitch-line);
+  background: var(--pitch-mid);
+  color: var(--chalk);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+}
+
+.past-gameweek-banner {
+  margin: 0 0 1.25rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--gold);
+  background: rgba(216, 168, 67, 0.08);
+  color: var(--gold);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* --- Tier list --- */
+
+.tier-board__columns {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+}
+
+.tier-board__position-heading {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin: 0 0 0.75rem;
+  color: var(--gold);
+}
+
+.tier-group {
+  margin: 0 0 1.25rem;
+}
+
+.tier-group__label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  margin: 0 0 0.4rem;
+  color: var(--sage);
+}
+
+.tier-group--s .tier-group__label { color: var(--gold); }
+.tier-group--a .tier-group__label { color: var(--easy); }
+.tier-group--d .tier-group__label { color: var(--hard); }
+
+.tier-group__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--pitch-line);
+}
+
+.tier-group__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--pitch-line);
+}
+
+.tier-group__name {
+  min-width: 0;
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tier-group__meta {
+  font-size: 0.75rem;
+  color: var(--sage);
+  white-space: nowrap;
+  display: none;
+}
+
+.tier-group__score {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--gold);
+  white-space: nowrap;
+}
+
+@media (min-width: 640px) {
+  .tier-group__meta {
+    display: inline;
+  }
+}
+
 @media (max-width: 480px) {
   .tabs {
     padding: 0 1.25rem;
@@ -1275,5 +1400,16 @@ body.modal-open {
 
   .grade-card__letter {
     font-size: 2.1rem;
+  }
+
+  .tier-board__columns {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+}
+
+@media (min-width: 481px) and (max-width: 900px) {
+  .tier-board__columns {
+    grid-template-columns: 1fr 1fr;
   }
 }

@@ -187,7 +187,11 @@ function renderPlayerList(players, options = {}) {
         ${playerPhotoMarkup(player)}
         <span class="pick__text">
           <span class="pick__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button>${
-      isTop ? '<span class="pick__badge">Top pick</span>' : ""
+      isTop
+        ? '<span class="pick__badge">Top pick</span>'
+        : player.isSleeperPick
+        ? '<span class="pick__badge pick__badge--sleeper">Sleeper pick</span>'
+        : ""
     }</span>
           <span class="pick__meta">${player.position} · ${teamBadgeMarkup(player)}${player.team} · £${player.price}m${
       player.reason ? ` · <span class="pick__reason">${player.reason}</span>` : ""
@@ -352,6 +356,69 @@ function renderTrending(data) {
   columns.appendChild(renderTrendingColumn("Trending in", data.trendingUp || []));
   columns.appendChild(renderTrendingColumn("Trending out", data.trendingDown || []));
   trending.appendChild(columns);
+}
+
+const TIER_ORDER = ["S", "A", "B", "C", "D"];
+
+function renderTierGroup(tier, players) {
+  const group = document.createElement("div");
+  group.className = `tier-group tier-group--${tier.toLowerCase()}`;
+
+  const heading = document.createElement("h4");
+  heading.className = "tier-group__label";
+  heading.textContent = `${tier} Tier`;
+  group.appendChild(heading);
+
+  const list = document.createElement("ul");
+  list.className = "tier-group__list";
+  list.innerHTML = players
+    .map(
+      (player) => `
+        <li class="tier-group__row">
+          ${playerPhotoMarkup(player)}
+          <span class="tier-group__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button></span>
+          <span class="tier-group__meta">${teamBadgeMarkup(player)}${player.team}</span>
+          <span class="tier-group__score">${player.score.toFixed(1)}</span>
+        </li>
+      `
+    )
+    .join("");
+  group.appendChild(list);
+
+  return group;
+}
+
+function renderTierColumn(position, players) {
+  const column = document.createElement("div");
+  column.className = "tier-board__column";
+
+  const heading = document.createElement("h3");
+  heading.className = "tier-board__position-heading";
+  heading.textContent = position;
+  column.appendChild(heading);
+
+  TIER_ORDER.forEach((tier) => {
+    const tierPlayers = players.filter((p) => p.tier === tier);
+    if (!tierPlayers.length) return;
+    column.appendChild(renderTierGroup(tier, tierPlayers));
+  });
+
+  return column;
+}
+
+function renderTierList(tierLists) {
+  const board = document.getElementById("tier-board");
+  if (!board) return;
+
+  board.innerHTML = "";
+  if (!tierLists) return;
+
+  const columns = document.createElement("div");
+  columns.className = "tier-board__columns";
+  ["GKP", "DEF", "MID", "FWD"].forEach((pos) => {
+    columns.appendChild(renderTierColumn(pos, tierLists[pos] || []));
+  });
+  board.appendChild(columns);
 }
 
 function playerFixtureRow(entry, kind) {
@@ -539,6 +606,7 @@ async function loadCaptainPicks() {
     renderBoard();
 
     renderTrending(data);
+    renderTierList(data.tierLists);
     renderSection(
       "differentials",
       "Differentials",
@@ -581,6 +649,90 @@ async function loadCaptainPicks() {
     board.appendChild(errorMessage);
     board.appendChild(retryButton);
   }
+}
+
+// --- Gameweek history -------------------------------------------------
+
+// Fetches and displays a saved past-gameweek snapshot instead of live data.
+// Snapshots only carry the top-15 picks (see server.js saveGameweekSnapshot),
+// so the trending/differentials/avoid/out-of-form sections are cleared
+// rather than showing stale or missing data.
+async function loadGameweekSnapshot(id) {
+  const board = document.getElementById("board");
+  const gameweekLabel = document.getElementById("gameweek-label");
+  const deadlineLabel = document.getElementById("deadline-label");
+  const banner = document.getElementById("past-gameweek-banner");
+
+  board.innerHTML = renderSkeletonBoard(6);
+  ["trending", "differentials", "avoid", "out-of-form"].forEach((sectionId) => {
+    const section = document.getElementById(sectionId);
+    if (section) section.innerHTML = "";
+  });
+  const tierBoard = document.getElementById("tier-board");
+  if (tierBoard) tierBoard.innerHTML = "";
+
+  try {
+    const res = await fetch(`/api/gameweek/${id}`);
+    if (!res.ok) throw new Error("Request failed");
+    const data = await res.json();
+
+    if (banner) banner.hidden = false;
+    gameweekLabel.textContent = data.gameweek;
+
+    if (data.deadline) {
+      const deadline = new Date(data.deadline);
+      deadlineLabel.textContent = `Deadline: ${deadline.toLocaleString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })}`;
+    } else {
+      deadlineLabel.textContent = "";
+    }
+
+    allPicks = data.picks || [];
+    boardFilter = "All";
+    boardSort = "score";
+    renderBoard();
+  } catch (err) {
+    console.error(err);
+    allPicks = [];
+    board.innerHTML = "";
+
+    const errorMessage = document.createElement("p");
+    errorMessage.className = "board__error";
+    errorMessage.textContent = "Could not load that gameweek right now.";
+    board.appendChild(errorMessage);
+  }
+}
+
+function initGameweekSelect() {
+  const select = document.getElementById("gameweek-select");
+  const banner = document.getElementById("past-gameweek-banner");
+  if (!select) return;
+
+  fetch("/api/gameweeks")
+    .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Request failed"))))
+    .then((data) => {
+      (data.gameweeks || []).forEach((id) => {
+        const option = document.createElement("option");
+        option.value = String(id);
+        option.textContent = `Gameweek ${id}`;
+        select.appendChild(option);
+      });
+    })
+    .catch((err) => console.error(err));
+
+  select.addEventListener("change", () => {
+    if (select.value === "current") {
+      if (banner) banner.hidden = true;
+      loadCaptainPicks();
+    } else {
+      loadGameweekSnapshot(select.value);
+    }
+  });
 }
 
 // Debounced player-search dropdown, shared by the masthead search (which
@@ -753,6 +905,7 @@ function initTabs() {
   const tabs = [
     { btn: "tab-btn-picks", view: "view-picks", title: "Who to captain this week" },
     { btn: "tab-btn-rate-team", view: "view-rate-team", title: "Rate your squad" },
+    { btn: "tab-btn-tier-list", view: "view-tier-list", title: "Tier list" },
   ];
   const pageTitle = document.getElementById("page-title");
 
@@ -1024,4 +1177,5 @@ initTabs();
 initRateTeam();
 initRateTeamModeToggle();
 initSquadBuilder();
+initGameweekSelect();
 loadCaptainPicks();
