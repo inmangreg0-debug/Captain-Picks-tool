@@ -369,25 +369,51 @@ function matchupClause(player) {
   return `${opponent} are averaging ${value} goals a game, a fair test either way`;
 }
 
-function verdictClause(projectedPoints, trend) {
-  if (projectedPoints >= 7) {
-    return `Projected for ${projectedPoints} points — one of the safer picks on the board`;
+function positionCategory(position) {
+  if (position === "GKP") return "goalkeepers";
+  if (position === "DEF") return "defenders";
+  if (position === "FWD") return "forwards";
+  return "midfielders";
+}
+
+// Closer templates for the report's final sentence. Rotates the same way
+// statFact's opener does (by player id/form) so the ending varies as much
+// as the opening — previously every report converged on one repeated
+// "Projected for {X} points — [safer pick / stronger options exist]"
+// template, restating a number that's already shown elsewhere on the card.
+// Only two of the four (the ones that name a projection) mention the
+// number at all; the other two deliver a plain-language verdict instead.
+// Deliberately mixed short/long so reports don't all land at the same
+// length and cadence.
+const POSITIVE_CLOSERS = [
+  (pts) => `Projected for ${pts} points — a near-lock captain option.`,
+  () => `Worth the gamble if you're chasing a rank climb.`,
+  (pts, player) =>
+    `Projected for ${pts} points, currently outscoring most ${positionCategory(player.position)} in his price bracket.`,
+  () => `Nothing flashy, but the underlying numbers back it up.`,
+];
+
+// Weak projections get their own skeptical pair rather than being forced
+// into the (misleadingly upbeat) positive rotation above.
+const SKEPTICAL_CLOSERS = [
+  () => `The raw numbers don't back up the hype here.`,
+  () => `There's real risk in this one.`,
+];
+
+function verdictClause(projectedPoints, player) {
+  if (projectedPoints < 3.5) {
+    const index = player.id % SKEPTICAL_CLOSERS.length;
+    return SKEPTICAL_CLOSERS[index](projectedPoints, player);
   }
-  if (projectedPoints >= 5) {
-    return trend === "down"
-      ? `Projected for ${projectedPoints} points — worth a punt if the form turns`
-      : `Projected for ${projectedPoints} points — a solid captaincy option`;
-  }
-  if (projectedPoints >= 3.5) {
-    return `Projected for ${projectedPoints} points — a fair squad option, nothing more`;
-  }
-  return `Only ${projectedPoints} points projected — stronger options exist in that price range`;
+  const index = (player.id + Math.floor(projectedPoints)) % POSITIVE_CLOSERS.length;
+  return POSITIVE_CLOSERS[index](projectedPoints, player);
 }
 
 // Combines a real recent stat, a matchup read using the opponent's actual
-// scoring/conceding rate, and the points projection into a tight, three-
-// sentence analyst-style note. Opener phrasing rotates per player (by id and
-// form) so reports don't all read as "{Name} is/has...".
+// scoring/conceding rate, and a verdict on the points projection into a
+// tight, three-sentence analyst-style note. Both the opener and the closer
+// rotate per player (by id and form/points) so reports don't all read as
+// "{Name} is/has... Projected for {X} points — {same closer every time}".
 function generateReport(player, projectedPoints) {
   const name = player.name;
   const trend = player.form >= 5 ? "up" : player.form < 3 ? "down" : "neutral";
@@ -406,7 +432,7 @@ function generateReport(player, projectedPoints) {
   const opening = openers[openerIndex](fact);
 
   const matchup = matchupClause(player);
-  const verdict = verdictClause(projectedPoints, trend);
+  const verdict = verdictClause(projectedPoints, player);
 
   return [opening, matchup, verdict]
     .filter(Boolean)
