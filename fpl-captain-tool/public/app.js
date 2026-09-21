@@ -763,19 +763,28 @@ function playerFixtureRow(entry, kind) {
   `;
 }
 
+function statChipMarkup(value, label) {
+  return `<span class="stat-chip">${value} ${label}</span>`;
+}
+
 // DEF/MID get the full breakdown (cards + grouped defensive-contribution
 // stats) since that's where defensive output actually swings fantasy value;
 // GKP/FWD get just the card count, kept brief since tackles/CBI/recoveries
-// rarely matter for those positions.
+// rarely matter for those positions. Each stat is its own chip (rather than
+// one run-on dot-separated line) so they read as scannable data, not prose.
 function playerStatsRowHtml(detail) {
-  const cardsHtml = `<span class="player-modal__stats-cards">${detail.yellowCards} yellow, ${detail.redCards} red</span>`;
+  const chips = [statChipMarkup(detail.yellowCards, "YEL"), statChipMarkup(detail.redCards, "RED")];
 
-  if (detail.position !== "DEF" && detail.position !== "MID") {
-    return `<p class="player-modal__stats-row player-modal__stats-row--brief">${cardsHtml}</p>`;
+  if (detail.position === "DEF" || detail.position === "MID") {
+    chips.push(
+      statChipMarkup(detail.tackles, "TKL"),
+      statChipMarkup(detail.clearancesBlocksInterceptions, "CBI"),
+      statChipMarkup(detail.recoveries, "REC"),
+      statChipMarkup(detail.defensiveContribution, "DC PTS")
+    );
   }
 
-  const defenseHtml = `<span class="player-modal__stats-defense">${detail.tackles} tackles · ${detail.clearancesBlocksInterceptions} CBI · ${detail.recoveries} recoveries · ${detail.defensiveContribution} DC pts this season</span>`;
-  return `<p class="player-modal__stats-row">${cardsHtml}${defenseHtml}</p>`;
+  return `<div class="player-modal__stats-row">${chips.join("")}</div>`;
 }
 
 function renderPlayerModalContent(detail) {
