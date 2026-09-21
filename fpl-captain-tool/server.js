@@ -60,6 +60,49 @@ function teamBadgeUrl(team) {
     : null;
 }
 
+// FPL's bootstrap-static teams array doesn't include brand colors, so this is
+// hardcoded from each club's actual primary kit/crest color. Keyed by
+// team.short_name. Covers every club that's appeared in the Premier League
+// in recent seasons (not just the current 20) so promotion/relegation
+// doesn't leave a team silently falling back to the default gold.
+const TEAM_COLORS = {
+  ARS: "#EF0107",
+  AVL: "#670E36",
+  BOU: "#DA291C",
+  BRE: "#E30613",
+  BHA: "#0057B8",
+  BUR: "#6C1D45",
+  CHE: "#034694",
+  COV: "#78D0F2",
+  CRY: "#1B458F",
+  EVE: "#003399",
+  FUL: "#000000",
+  HUL: "#F18A01",
+  IPS: "#3A64A3",
+  LEE: "#FFCD00",
+  LEI: "#003090",
+  LIV: "#C8102E",
+  LUT: "#F78F1E",
+  MCI: "#6CABDD",
+  MUN: "#DA291C",
+  NEW: "#241F20",
+  NFO: "#DD0000",
+  NOR: "#FFF200",
+  SHU: "#EE2737",
+  SOU: "#D71920",
+  SUN: "#EB172B",
+  TOT: "#132257",
+  WAT: "#FBEE23",
+  WBA: "#122F67",
+  WHU: "#7A263A",
+  WOL: "#FDB913",
+};
+const DEFAULT_TEAM_COLOR = "#d8a843"; // matches --gold, for any team not in the map above
+
+function getTeamColor(team) {
+  return (team && TEAM_COLORS[team.short_name]) || DEFAULT_TEAM_COLOR;
+}
+
 // How much more fixture ease should count than recent form when scoring a
 // player. >1 means fixture difficulty dominates the score; tune here.
 const FIXTURE_WEIGHT = 1.5;
@@ -506,6 +549,7 @@ function buildPlayerRecord(p, ctx) {
     score,
     photoCode: playerPhotoCode(p),
     teamBadge: teamBadgeUrl(team),
+    teamColor: getTeamColor(team),
     positiveStat,
     negativeStat,
     formStatus,
@@ -645,6 +689,42 @@ async function getPreviousFormById(currentEventId) {
     return map;
   } catch (err) {
     console.error("Could not load previous gameweek's form for dampening:", err);
+    return null;
+  }
+}
+
+// Looks up how last gameweek's #1 pick (by score, from the saved snapshot)
+// actually scored, using the FPL API's per-gameweek live endpoint — a
+// credibility check shown at the top of the page. Returns null (never
+// throws) when there's no previous gameweek, no saved snapshot for it, or
+// the live stats aren't available yet, so the frontend can just show
+// nothing rather than an error. Only ever has real data starting from the
+// second gameweek after this ships, since it depends on a prior snapshot.
+async function getLastGameweekResult(currentEventId) {
+  if (currentEventId <= 1) return null;
+  const previousEventId = currentEventId - 1;
+
+  try {
+    const snapshot = await redis.get(`gameweek:${previousEventId}`);
+    if (!snapshot || !Array.isArray(snapshot.picks) || snapshot.picks.length === 0) return null;
+
+    const topPick = [...snapshot.picks].sort((a, b) => b.score - a.score)[0];
+    if (!topPick) return null;
+
+    const live = await fetchJSON(`${FPL_BASE}/event/${previousEventId}/live/`);
+    const liveEntry = live.elements.find((e) => e.id === topPick.id);
+    const actualPoints = liveEntry ? liveEntry.stats.total_points : null;
+    if (actualPoints == null) return null;
+
+    return {
+      playerId: topPick.id,
+      name: topPick.name,
+      predictedRank: 1,
+      actualPoints,
+      gameweek: snapshot.gameweek,
+    };
+  } catch (err) {
+    console.error("Could not load last gameweek's result:", err);
     return null;
   }
 }
@@ -850,6 +930,8 @@ async function getCaptainPicks() {
     tierLists[pos] = buildTierList(scoredPlayers.filter((p) => p.position === pos));
   });
 
+  const lastGameweekResult = await getLastGameweekResult(nextEvent.id);
+
   const result = {
     gameweek: nextEvent.name,
     eventId: nextEvent.id,
@@ -861,6 +943,7 @@ async function getCaptainPicks() {
     trendingUp,
     trendingDown,
     tierLists,
+    lastGameweekResult,
   };
 
   cache = { data: result, expires: Date.now() + CACHE_MS };
@@ -1048,6 +1131,7 @@ async function getPlayerDetail(id) {
     form,
     photoCode: playerPhotoCode(player),
     teamBadge: teamBadgeUrl(team),
+    teamColor: getTeamColor(team),
     positiveStat,
     negativeStat,
     formStatus,

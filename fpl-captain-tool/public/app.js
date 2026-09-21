@@ -14,6 +14,148 @@ let boardSort = "score";
 let allTierLists = null;
 let tierPositionFilter = "MID";
 
+const POSITION_TAG_CLASS = {
+  GKP: "position-tag--gkp",
+  DEF: "position-tag--def",
+  MID: "position-tag--mid",
+  FWD: "position-tag--fwd",
+};
+
+function positionTagMarkup(position) {
+  const cls = POSITION_TAG_CLASS[position] || "";
+  return `<span class="position-tag ${cls}">${position}</span>`;
+}
+
+// Small hand-coded inline SVGs (no icon library needed) — styled with
+// currentColor so they inherit whatever text color surrounds them.
+function iconFixtureMarkup() {
+  return `<svg class="stat-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9Zm1.5-.2a.2.2 0 0 0-.2.2v2h9.4v-2a.2.2 0 0 0-.2-.2h-9Zm9.2 3.5H3.3v5.7c0 .11.09.2.2.2h9a.2.2 0 0 0 .2-.2V6.8Z"/></svg>`;
+}
+
+function iconShirtMarkup() {
+  return `<svg class="stat-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M5.5 1.5 3 3 1 5.2l1.8 1.8L4 5.9V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V5.9l1.2 1.1L15 5.2 13 3l-2.5-1.5L9 2.6a1 1 0 0 1-2 0L5.5 1.5Z"/></svg>`;
+}
+
+function hexToRgba(hex, alpha) {
+  if (typeof hex !== "string") return `rgba(216, 168, 67, ${alpha})`;
+  const clean = hex.replace("#", "");
+  const full = clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean;
+  const num = parseInt(full, 16);
+  if (Number.isNaN(num)) return `rgba(216, 168, 67, ${alpha})`;
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// Animates a single element's text content counting up from 0 to `target`
+// via requestAnimationFrame. Respects prefers-reduced-motion by skipping
+// straight to the final value.
+function animateCountUp(el, target, options = {}) {
+  const { decimals = 1, duration = 500, delay = 0 } = options;
+  if (!el || !Number.isFinite(target)) return;
+
+  if (REDUCED_MOTION) {
+    el.textContent = target.toFixed(decimals);
+    return;
+  }
+
+  el.textContent = (0).toFixed(decimals);
+  let startTime = null;
+
+  function frame(now) {
+    if (startTime === null) startTime = now + delay;
+    if (now < startTime) {
+      requestAnimationFrame(frame);
+      return;
+    }
+    const elapsed = now - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 2); // ease-out
+    el.textContent = (target * eased).toFixed(decimals);
+    if (progress < 1) requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
+}
+
+// Finds every count-up target within `root` (data-countup="<value>", plus
+// optional data-decimals/data-delay) and animates them together. Delays are
+// authored per-row when the markup is built, so rows stagger in rather than
+// all animating at once.
+function runCountUps(root) {
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll("[data-countup]").forEach((el) => {
+    const target = parseFloat(el.dataset.countup);
+    const decimals = el.dataset.decimals ? parseInt(el.dataset.decimals, 10) : 1;
+    const delay = el.dataset.delay ? parseInt(el.dataset.delay, 10) : 0;
+    animateCountUp(el, target, { decimals, delay });
+  });
+}
+
+function rowDelay(index) {
+  return Math.min(index * 40, 400);
+}
+
+// --- Live deadline countdown ---------------------------------------------
+
+let deadlineTimestamp = null;
+let deadlineCountdownInterval = null;
+const DEADLINE_URGENT_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+function formatCountdown(ms) {
+  const totalMinutes = Math.max(0, Math.floor(ms / 60000));
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function updateDeadlineCountdown() {
+  const label = document.getElementById("deadline-label");
+  if (!label || deadlineTimestamp == null) return;
+
+  const remaining = deadlineTimestamp - Date.now();
+  if (remaining <= 0) {
+    label.textContent = "Deadline passed";
+    label.classList.remove("is-urgent");
+    return;
+  }
+
+  label.textContent = `Deadline: ${formatCountdown(remaining)}`;
+  label.classList.toggle("is-urgent", remaining <= DEADLINE_URGENT_MS);
+}
+
+function stopDeadlineCountdown() {
+  if (deadlineCountdownInterval) {
+    clearInterval(deadlineCountdownInterval);
+    deadlineCountdownInterval = null;
+  }
+  deadlineTimestamp = null;
+}
+
+// Replaces the static "Deadline: [date]" text with a live countdown that
+// re-renders every minute and switches to an urgent color under 3 hours.
+function startDeadlineCountdown(deadlineIso) {
+  stopDeadlineCountdown();
+  const label = document.getElementById("deadline-label");
+
+  if (!deadlineIso) {
+    if (label) {
+      label.textContent = "";
+      label.classList.remove("is-urgent");
+    }
+    return;
+  }
+
+  deadlineTimestamp = new Date(deadlineIso).getTime();
+  updateDeadlineCountdown();
+  deadlineCountdownInterval = setInterval(updateDeadlineCountdown, 60 * 1000);
+}
+
 function formatNetTransfers(n) {
   const sign = n >= 0 ? "+" : "−";
   const abs = Math.abs(n);
@@ -143,12 +285,13 @@ function renderTrendingColumn(title, players) {
   list.innerHTML = players
     .map(
       (player) => `
-        <li class="trend__row">
+        <li class="trend__row" style="--team-accent: ${player.teamColor || "var(--pitch-line)"}">
           <span class="trend__player">
             ${playerPhotoMarkup(player)}
+            ${positionTagMarkup(player.position)}
             <span class="trend__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button></span>
           </span>
-          <span class="trend__meta">${player.position} · ${teamBadgeMarkup(player)}${player.team} · £${player.price}m</span>
+          <span class="trend__meta">${teamBadgeMarkup(player)}${player.team} · <span class="stat-pair">${iconShirtMarkup()}£${player.price}m</span></span>
           <span class="trend__net">${formatNetTransfers(player.netTransfers)}</span>
         </li>
       `
@@ -179,15 +322,18 @@ function renderPlayerList(players, options = {}) {
     ]
       .filter(Boolean)
       .join(" ");
+    item.style.setProperty("--team-accent", player.teamColor || "var(--pitch-line)");
 
     const { className: difficultyClass, label: difficultyLabel } = difficultyInfo(
       player.difficulty
     );
+    const delay = rowDelay(index);
 
     item.innerHTML = `
       <span class="pick__rank">${index + 1}</span>
       <span class="pick__main">
         ${playerPhotoMarkup(player)}
+        ${positionTagMarkup(player.position)}
         <span class="pick__text">
           <span class="pick__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button>${
       isTop
@@ -200,13 +346,13 @@ function renderPlayerList(players, options = {}) {
         ? '<span class="pick__badge pick__badge--volatile">Boom-or-bust</span>'
         : ""
     }</span>
-          <span class="pick__meta">${player.position} · ${teamBadgeMarkup(player)}${player.team} · £${player.price}m${
+          <span class="pick__meta">${teamBadgeMarkup(player)}${player.team} · <span class="stat-pair">${iconShirtMarkup()}£${player.price}m</span>${
       player.reason ? ` · <span class="pick__reason">${player.reason}</span>` : ""
     }</span>
         </span>
       </span>
-      <span class="pick__fixture fixture--${difficultyClass}" title="${difficultyLabel}">
-        ${player.isHome ? "vs" : "@"} ${player.opponent}
+      <span class="pick__fixture fixture--${difficultyClass} stat-pair" title="${difficultyLabel}">
+        ${iconFixtureMarkup()}${player.isHome ? "vs" : "@"} ${player.opponent}
       </span>
       <span class="pick__form">Form ${player.form.toFixed(1)}</span>
       <span class="pick__score">
@@ -216,10 +362,10 @@ function renderPlayerList(players, options = {}) {
             : player.trendingUp
             ? '<span class="pick__trend-up" title="Trending up" aria-label="Trending up">▲</span>'
             : ""
-        }${player.score.toFixed(1)}</span>
+        }<span data-countup="${player.score}" data-decimals="1" data-delay="${delay}">0.0</span></span>
         ${
           typeof player.projectedPoints === "number"
-            ? `<span class="pick__proj">Proj: ${player.projectedPoints.toFixed(1)} pts</span>`
+            ? `<span class="pick__proj">Proj: <span data-countup="${player.projectedPoints}" data-decimals="1" data-delay="${delay}">0.0</span> pts</span>`
             : ""
         }
       </span>
@@ -228,7 +374,86 @@ function renderPlayerList(players, options = {}) {
     list.appendChild(item);
   });
 
+  runCountUps(list);
   return list;
+}
+
+// Pulls a short, punchy headline out of a player's report — the first
+// clause/sentence — rather than dumping the whole three-sentence report
+// into the hero card.
+function heroHeadline(player) {
+  if (!player.report) return "";
+  const match = player.report.match(/^[^.!?,]+[.!?,]?/);
+  return (match ? match[0] : player.report).replace(/[,]$/, "").trim();
+}
+
+// Renders the #1 overall pick as a standalone hero section, additive to
+// (not a replacement for) the ranked list below it — see renderBoard.
+function renderHero(player) {
+  const hero = document.getElementById("hero-pick");
+  if (!hero) return;
+
+  if (!player) {
+    hero.innerHTML = "";
+    return;
+  }
+
+  const photoUrl = playerPhotoUrl(player);
+  const tint = hexToRgba(player.teamColor, 0.08);
+
+  hero.innerHTML = `
+    <div class="hero__card" style="--hero-tint: ${tint}">
+      <span class="hero__label">Captain pick of the week</span>
+      <div class="hero__main">
+        <span class="hero__photo">${
+          photoUrl ? `<img src="${photoUrl}" alt="" loading="lazy" onerror="this.remove()" />` : ""
+        }</span>
+        <div class="hero__info">
+          <div class="hero__name-row">
+            ${positionTagMarkup(player.position)}
+            <button type="button" class="player-link hero__name" data-player-id="${player.id}">${player.name}</button>
+            ${teamBadgeMarkup(player)}
+          </div>
+          <p class="hero__headline">${heroHeadline(player)}</p>
+          <span class="hero__meta">${player.team} · ${player.isHome ? "vs" : "@"} ${player.opponent}</span>
+        </div>
+        <div class="hero__score">
+          <span class="hero__score-value" data-countup="${player.score}" data-decimals="1">0.0</span>
+          <span class="hero__score-label">Score</span>
+          ${
+            typeof player.projectedPoints === "number"
+              ? `<span class="hero__proj">Proj: <span data-countup="${player.projectedPoints}" data-decimals="1">0.0</span> pts</span>`
+              : ""
+          }
+        </div>
+      </div>
+    </div>
+  `;
+
+  runCountUps(hero);
+}
+
+// Displays last gameweek's #1 pick's actual result as a credibility
+// statement. Shows nothing (not an error) until a snapshot exists to check
+// against — see server.js getLastGameweekResult.
+function renderLastGameweekResult(result) {
+  const el = document.getElementById("last-result");
+  if (!el) return;
+
+  if (!result) {
+    el.hidden = true;
+    el.innerHTML = "";
+    return;
+  }
+
+  const scoredWell = result.actualPoints >= 8;
+  el.hidden = false;
+  el.className = "last-result" + (scoredWell ? " last-result--good" : "");
+  el.innerHTML = `
+    <span class="last-result__label">Last week's top pick:</span>
+    <span class="last-result__name">${result.name}</span>
+    <span class="last-result__points">scored ${result.actualPoints} pt${result.actualPoints === 1 ? "" : "s"}</span>
+  `;
 }
 
 function getFilteredSortedPicks() {
@@ -380,9 +605,10 @@ function renderTierGroup(tier, players) {
   list.className = "tier-group__list";
   list.innerHTML = players
     .map(
-      (player) => `
-        <li class="tier-group__row">
+      (player, index) => `
+        <li class="tier-group__row" style="--team-accent: ${player.teamColor || "var(--pitch-line)"}">
           ${playerPhotoMarkup(player)}
+          ${positionTagMarkup(player.position)}
           <span class="tier-group__name"><button type="button" class="player-link" data-player-id="${player.id}">${player.name}</button></span>
           ${
             player.consistencyTag === "Boom-or-bust"
@@ -390,12 +616,13 @@ function renderTierGroup(tier, players) {
               : ""
           }
           <span class="tier-group__meta">${teamBadgeMarkup(player)}${player.team}</span>
-          <span class="tier-group__score">${player.score.toFixed(1)}</span>
+          <span class="tier-group__score" data-countup="${player.score}" data-decimals="1" data-delay="${rowDelay(index)}">0.0</span>
         </li>
       `
     )
     .join("");
   group.appendChild(list);
+  runCountUps(group);
 
   return group;
 }
@@ -449,6 +676,72 @@ function renderTierList(tierLists) {
   renderTierBoard();
 }
 
+// Horizontal 0-10 gauge bar replacing the plain "Form 6.0" text, filled
+// proportionally and colored by the same good/neutral/bad tier driving the
+// modal's overall tint.
+function renderFormGauge(form, formTier) {
+  const pct = Math.max(0, Math.min(100, (form / 10) * 100));
+  const tierClass =
+    formTier === "good" ? "form-gauge__fill--good" : formTier === "bad" ? "form-gauge__fill--bad" : "form-gauge__fill--neutral";
+  return `
+    <div class="form-gauge">
+      <span class="form-gauge__label">Form ${form.toFixed(1)}</span>
+      <div class="form-gauge__track">
+        <div class="form-gauge__fill ${tierClass}" style="width: ${pct}%"></div>
+      </div>
+    </div>
+  `;
+}
+
+// A compact five-block strip standing in for the old full fixture table —
+// one glanceable block per upcoming fixture, colored by difficulty and
+// labeled with the opponent below it.
+function renderFixtureTicker(nextFive) {
+  if (!nextFive.length) return '<p class="player-modal__empty">No fixtures scheduled.</p>';
+
+  const blocks = nextFive
+    .map((f) => {
+      const { className, label } = difficultyInfo(f.difficulty);
+      return `
+        <div class="fixture-ticker__item">
+          <span class="fixture-ticker__block fixture--${className}" title="${label}"></span>
+          <span class="fixture-ticker__opponent">${f.isHome ? "vs" : "@"} ${f.opponent}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  return `<div class="fixture-ticker">${blocks}</div>`;
+}
+
+// Five simple bars (oldest to most recent, left to right), height
+// proportional to points scored that gameweek — a glanceable read on recent
+// form alongside the existing numeric table.
+function renderSparkline(lastFive) {
+  if (!lastFive.length) return "";
+
+  const chronological = [...lastFive].reverse();
+  const max = Math.max(...chronological.map((h) => h.points), 1);
+  const bars = chronological
+    .map((h) => {
+      const heightPct = Math.max(6, Math.round((Math.max(h.points, 0) / max) * 100));
+      return `<span class="sparkline__bar" style="height: ${heightPct}%" title="${h.points} pt${h.points === 1 ? "" : "s"} vs ${h.opponent}"></span>`;
+    })
+    .join("");
+
+  return `<div class="sparkline">${bars}</div>`;
+}
+
+// Collapsed by default; toggled via the delegated click handler in
+// initPlayerModal so the granular table stays accessible without cluttering
+// the default glanceable view.
+function detailsToggleMarkup(id, tableHtml) {
+  return `
+    <button type="button" class="modal-details-toggle" data-target="${id}" aria-expanded="false">View details</button>
+    <div class="modal-details" id="${id}" hidden>${tableHtml}</div>
+  `;
+}
+
 function playerFixtureRow(entry, kind) {
   if (kind === "past") {
     return `
@@ -494,6 +787,13 @@ function renderPlayerModalContent(detail) {
     ? detail.nextFive.map((f) => playerFixtureRow(f, "future")).join("")
     : '<tr><td colspan="3">No fixtures scheduled.</td></tr>';
 
+  const nextFiveTable = `
+    <table class="player-modal__table">
+      <thead><tr><th>Opponent</th><th>Difficulty</th><th>Proj. pts</th></tr></thead>
+      <tbody>${nextFiveRows}</tbody>
+    </table>
+  `;
+
   const photoUrl = playerPhotoUrl(detail);
   const photoHtml = photoUrl
     ? `<img class="player-modal__photo" src="${photoUrl}" alt="" loading="lazy" onerror="this.remove()" />`
@@ -510,15 +810,26 @@ function renderPlayerModalContent(detail) {
     : "";
 
   return `
-    ${photoHtml}
-    <h2 id="player-modal-name" class="player-modal__title">${detail.name}</h2>
-    <p class="player-modal__meta">${detail.position} · ${detail.team} · Form ${detail.form.toFixed(1)}</p>
+    <div class="player-modal__banner" style="--team-color: ${detail.teamColor || "var(--gold)"}"></div>
+    <div class="player-modal__photo-wrap">${photoHtml}</div>
+    <div class="player-modal__header">
+      <div class="player-modal__name-row">
+        <h2 id="player-modal-name" class="player-modal__title">${detail.name}</h2>
+        ${teamBadgeMarkup(detail)}
+      </div>
+      <div class="player-modal__tags">
+        ${positionTagMarkup(detail.position)}
+        <span class="player-modal__team">${detail.team}</span>
+      </div>
+    </div>
+    ${renderFormGauge(detail.form, detail.formTier)}
     ${playerStatsRowHtml(detail)}
     ${positiveHtml}
     ${negativeHtml}
     ${reportHtml}
     <div class="player-modal__section">
       <h3 class="player-modal__heading">Last 5 gameweeks</h3>
+      ${renderSparkline(detail.lastFive)}
       <table class="player-modal__table">
         <thead><tr><th>Opponent</th><th>Pts</th><th>Mins</th></tr></thead>
         <tbody>${lastFiveRows}</tbody>
@@ -526,10 +837,8 @@ function renderPlayerModalContent(detail) {
     </div>
     <div class="player-modal__section">
       <h3 class="player-modal__heading">Next 5 fixtures</h3>
-      <table class="player-modal__table">
-        <thead><tr><th>Opponent</th><th>Difficulty</th><th>Proj. pts</th></tr></thead>
-        <tbody>${nextFiveRows}</tbody>
-      </table>
+      ${renderFixtureTicker(detail.nextFive)}
+      ${detailsToggleMarkup("next-five-details", nextFiveTable)}
     </div>
   `;
 }
@@ -597,6 +906,17 @@ function initPlayerModal() {
   closeButton.addEventListener("click", closePlayerModal);
   modal.addEventListener("click", (e) => {
     if (e.target.dataset.dismiss === "backdrop") closePlayerModal();
+
+    const toggle = e.target.closest(".modal-details-toggle");
+    if (toggle) {
+      const target = document.getElementById(toggle.dataset.target);
+      if (target) {
+        const willShow = target.hidden;
+        target.hidden = !willShow;
+        toggle.textContent = willShow ? "Hide details" : "View details";
+        toggle.setAttribute("aria-expanded", String(willShow));
+      }
+    }
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !modal.hidden) closePlayerModal();
@@ -625,22 +945,14 @@ async function loadCaptainPicks() {
     const data = await res.json();
 
     gameweekLabel.textContent = data.gameweek;
-
-    if (data.deadline) {
-      const deadline = new Date(data.deadline);
-      deadlineLabel.textContent = `Deadline: ${deadline.toLocaleString(undefined, {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      })}`;
-    }
+    startDeadlineCountdown(data.deadline);
+    renderLastGameweekResult(data.lastGameweekResult);
 
     if (!data.picks || data.picks.length === 0) {
       allPicks = [];
       board.innerHTML =
         '<p class="board__empty">No picks available yet — check back closer to the deadline.</p>';
+      renderHero(null);
       return;
     }
 
@@ -648,6 +960,7 @@ async function loadCaptainPicks() {
     boardFilter = "All";
     boardSort = "score";
     renderBoard();
+    renderHero([...allPicks].sort((a, b) => b.score - a.score)[0]);
 
     renderTrending(data);
     renderTierList(data.tierLists);
@@ -675,6 +988,8 @@ async function loadCaptainPicks() {
     console.error(err);
     allPicks = [];
     board.innerHTML = "";
+    renderHero(null);
+    renderLastGameweekResult(null);
     ["trending", "differentials", "avoid", "out-of-form"].forEach((id) => {
       const section = document.getElementById(id);
       if (section) section.innerHTML = "";
@@ -708,6 +1023,8 @@ async function loadGameweekSnapshot(id) {
   const banner = document.getElementById("past-gameweek-banner");
 
   board.innerHTML = renderSkeletonBoard(6);
+  renderHero(null);
+  renderLastGameweekResult(null);
   ["trending", "differentials", "avoid", "out-of-form"].forEach((sectionId) => {
     const section = document.getElementById(sectionId);
     if (section) section.innerHTML = "";
@@ -721,6 +1038,7 @@ async function loadGameweekSnapshot(id) {
 
     if (banner) banner.hidden = false;
     gameweekLabel.textContent = data.gameweek;
+    stopDeadlineCountdown();
 
     if (data.deadline) {
       const deadline = new Date(data.deadline);
