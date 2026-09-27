@@ -36,6 +36,45 @@ function iconShirtMarkup() {
   return `<svg class="stat-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M5.5 1.5 3 3 1 5.2l1.8 1.8L4 5.9V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V5.9l1.2 1.1L15 5.2 13 3l-2.5-1.5L9 2.6a1 1 0 0 1-2 0L5.5 1.5Z"/></svg>`;
 }
 
+const THEME_ORDER = ["dark", "light", "grey"];
+const THEME_STORAGE_KEY = "cp-theme";
+const THEME_ICONS = {
+  dark: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12.5 9.9A5.5 5.5 0 0 1 6.1 3.5a.5.5 0 0 0-.7-.6A6.5 6.5 0 1 0 13.1 10.6a.5.5 0 0 0-.6-.7Z"/></svg>`,
+  light: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 4.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13.25a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75ZM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM2.75 8a.75.75 0 0 1-.75.75H.5a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 .75.75Zm10.68-5.43a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM4.7 11.62a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm8.68 2.12a.75.75 0 0 1-1.06 0l-1.06-1.06a.75.75 0 1 1 1.06-1.06l1.06 1.06a.75.75 0 0 1 0 1.06ZM4.7 4.38a.75.75 0 0 1-1.06 0L2.58 3.32a.75.75 0 0 1 1.06-1.06L4.7 3.32a.75.75 0 0 1 0 1.06Z"/></svg>`,
+  grey: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 1.25a6.75 6.75 0 0 0 0 13.5v-13.5Z"/><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>`,
+};
+
+function applyTheme(theme) {
+  if (theme === "light" || theme === "grey") {
+    document.documentElement.setAttribute("data-theme", theme);
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+  const btn = document.getElementById("theme-toggle");
+  if (btn) btn.innerHTML = THEME_ICONS[theme] || THEME_ICONS.dark;
+}
+
+function initThemeToggle() {
+  const btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+
+  let stored = null;
+  try {
+    stored = localStorage.getItem(THEME_STORAGE_KEY);
+  } catch (e) {}
+
+  let current = THEME_ORDER.includes(stored) ? stored : "dark";
+  applyTheme(current);
+
+  btn.addEventListener("click", () => {
+    current = THEME_ORDER[(THEME_ORDER.indexOf(current) + 1) % THEME_ORDER.length];
+    applyTheme(current);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, current);
+    } catch (e) {}
+  });
+}
+
 function hexToRgba(hex, alpha) {
   if (typeof hex !== "string") return `rgba(216, 168, 67, ${alpha})`;
   const clean = hex.replace("#", "");
@@ -1302,4 +1341,5 @@ initPlayerSearch();
 initPullToRefresh();
 initTabs();
 initGameweekSelect();
+initThemeToggle();
 loadCaptainPicks();

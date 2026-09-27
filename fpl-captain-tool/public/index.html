@@ -7,6 +7,16 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script>
+  (function () {
+    try {
+      var theme = localStorage.getItem("cp-theme");
+      if (theme === "light" || theme === "grey") {
+        document.documentElement.setAttribute("data-theme", theme);
+      }
+    } catch (e) {}
+  })();
+</script>
 </head>
 <body>
 
@@ -18,10 +28,13 @@
     </div>
   </header>
 
-  <nav class="tabs" role="tablist" aria-label="View">
-    <button type="button" class="tab-btn is-active" id="tab-btn-picks" role="tab" aria-selected="true" aria-controls="view-picks">Captain Picks</button>
-    <button type="button" class="tab-btn" id="tab-btn-tier-list" role="tab" aria-selected="false" aria-controls="view-tier-list">Tier List</button>
-  </nav>
+  <div class="tabs-row">
+    <nav class="tabs" role="tablist" aria-label="View">
+      <button type="button" class="tab-btn is-active" id="tab-btn-picks" role="tab" aria-selected="true" aria-controls="view-picks">Captain Picks</button>
+      <button type="button" class="tab-btn" id="tab-btn-tier-list" role="tab" aria-selected="false" aria-controls="view-tier-list">Tier List</button>
+    </nav>
+    <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Change color theme"></button>
+  </div>
 
   <main>
     <div class="view" id="view-picks" role="tabpanel" aria-labelledby="tab-btn-picks">
